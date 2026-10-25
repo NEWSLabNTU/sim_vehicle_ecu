@@ -17,7 +17,11 @@ and Control*, ch. 8 and 14). This one does it the textbook way:
   PhysX's own definition (its tire adds its minimum slip denominator, 4 m/s on the rig, to
   the speed), the one the ABS and TC thresholds were tuned against when they read PhysX's
   slip. A `max(|v|, 4)` read up to twice that at town speeds (scenario-world-bridge issue
-  009).
+  009). In a turn each wheel's own road speed differs from the car's: the yaw rate moves the
+  outer wheels faster and the inner slower, and a steered front wheel rolls along its own
+  heading. So each wheel speed is held against the speed its place on the car gives (the
+  yaw rate sensor, the tire angle, the sideslip), for the reference speed and the slip
+  alike.
 - **Sideslip**: the kinematic integral `beta' = a_y / v - r` (exact for small angles, the
   acceleration being the body's in its own frame), with a washout so a sensor's bias does
   not build up: `est_sideslip_washout` s.
@@ -81,19 +85,41 @@ class Estimator:
             return self.out
         r = c.wheel_radius
         road = [w * r for w in sensors.wheel_speeds]
+        place = self._places(sensors.yaw_rate, tire_angle)
+        # what each wheel says of the car's speed, its place on the car taken out
+        body = [(u - b) / k for u, (k, b) in zip(road, place)]
         if self.started:
-            self.speed = self._speed(road, sensors.accel_x, dt, activity)
+            self.speed = self._speed(body, sensors.accel_x, dt, activity)
         else:  # the first reading: the wheels, as a module waking up takes them
-            self.speed = sum(road) / len(road)
+            self.speed = sum(body) / len(body)
             self.started = True
         v = self.speed
-        denominator = abs(v) + c.est_slip_offset
-        wheels = tuple(Wheel(w, (u - v) / denominator)
-                       for w, u in zip(sensors.wheel_speeds, road))
+        wheels = []
+        for w, u, (k, b) in zip(sensors.wheel_speeds, road, place):
+            ground = k * v + b  # the road's speed along this wheel
+            wheels.append(Wheel(w, (u - ground) / (abs(ground) + c.est_slip_offset)))
+        wheels = tuple(wheels)
         self._sideslip(v, sensors, dt)
         self._friction(v, sensors, dt, tire_angle, activity)
         self.out = Estimate(v, wheels, self.sideslip, self.friction)
         return self.out
+
+    def _places(self, yaw_rate, tire_angle):
+        """Per wheel (k, b): the road's speed along the wheel is k v + b for the car's speed v
+        at base_link (the rear axle's centre). A wheel at (x, y) moves at (v - r y, v beta + r x)
+        in the body frame; a front wheel rolls along the tire angle d, so it sees that velocity's
+        part along (cos d, sin d)."""
+        c = self.c
+        beta = self.sideslip
+        half = c.wheel_tread / 2
+        out = []
+        for i, y in enumerate((half, -half, half, -half)):
+            if i < 2:
+                cd, sd = math.cos(tire_angle), math.sin(tire_angle)
+                out.append((cd + beta * sd, yaw_rate * (c.wheel_base * sd - y * cd)))
+            else:
+                out.append((1.0, -yaw_rate * y))
+        return out
 
     def _speed(self, road, accel_x, dt, activity):
         c = self.c

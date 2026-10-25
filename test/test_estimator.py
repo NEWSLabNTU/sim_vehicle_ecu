@@ -18,15 +18,24 @@ def sensors(c, road, yaw_rate=0.0, ax=0.0, ay=0.0):
     return Sensors(tuple(u / c.wheel_radius for u in road), yaw_rate, ax, ay)
 
 
+def turning(c, v, yaw_rate, tire_angle):
+    """The road speed along each wheel of a car at `v` (base_link) turning at `yaw_rate`
+    with no sideslip, the fronts steered to `tire_angle`."""
+    half, cd, sd = c.wheel_tread / 2, math.cos(tire_angle), math.sin(tire_angle)
+    return ((v - yaw_rate * half) * cd + yaw_rate * c.wheel_base * sd,
+            (v + yaw_rate * half) * cd + yaw_rate * c.wheel_base * sd,
+            v - yaw_rate * half, v + yaw_rate * half)
+
+
 class SpeedTest(unittest.TestCase):
     def setUp(self):
         self.c = Calibration()
         self.e = Estimator(self.c, REAR)
 
-    def run_for(self, seconds, make, activity=Activity()):
+    def run_for(self, seconds, make, activity=Activity(), tire_angle=0.0):
         est = None
         for n in range(round(seconds / DT)):
-            est = self.e.step(make(n * DT), DT, 0.0, activity)
+            est = self.e.step(make(n * DT), DT, tire_angle, activity)
         return est
 
     def test_rolling_freely_it_is_the_wheels(self):
@@ -68,6 +77,16 @@ class SpeedTest(unittest.TestCase):
         self.assertAlmostEqual(est.wheels[2].slip, 2.0 / (1.0 + self.c.est_slip_offset),
                                delta=0.01)
 
+    def test_a_turn_is_no_slip(self):
+        # rolling through a left turn: the outer wheels faster, the steered fronts along their
+        # own heading; none of it is slip, and the car's speed is base_link's
+        road = turning(self.c, 10.0, 0.5, 0.1)
+        est = self.run_for(0.5, lambda t: sensors(self.c, road, yaw_rate=0.5, ay=5.0),
+                           tire_angle=0.1)
+        self.assertAlmostEqual(est.speed, 10.0, delta=0.01)
+        for w in est.wheels:
+            self.assertAlmostEqual(w.slip, 0.0, delta=0.002)
+
     def test_reverse(self):
         est = self.run_for(0.5, lambda t: sensors(self.c, -3.0))
         self.assertAlmostEqual(est.speed, -3.0, delta=0.01)
@@ -88,7 +107,8 @@ class SideslipTest(unittest.TestCase):
         e = Estimator(c, REAR)
         e.step(sensors(c, 10.0), DT, 0.0, Activity())
         for _ in range(round(2.0 / DT)):
-            est = e.step(sensors(c, 10.0, yaw_rate=0.5, ay=5.0), DT, 0.1, Activity())
+            est = e.step(sensors(c, turning(c, 10.0, 0.5, 0.1), yaw_rate=0.5, ay=5.0), DT, 0.1,
+                         Activity())
         self.assertAlmostEqual(est.sideslip, 0.0, delta=1e-6)
 
     def test_the_washout_forgets_a_bias(self):
