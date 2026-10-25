@@ -44,7 +44,8 @@ class SpeedTest(unittest.TestCase):
         est = self.run_for(0.5, lambda t: sensors(self.c, (10.0, 10.0, 15.0, 15.0)),
                            Activity(driving=True))
         self.assertAlmostEqual(est.speed, 10.0, delta=0.01)
-        self.assertAlmostEqual(est.wheels[2].slip, 0.5, delta=0.01)
+        self.assertAlmostEqual(est.wheels[2].slip, 5.0 / (10.0 + self.c.est_slip_offset),
+                               delta=0.01)
         self.assertAlmostEqual(est.wheels[0].slip, 0.0, delta=0.01)
 
     def test_braking_with_every_wheel_slipping_follows_the_deceleration(self):
@@ -57,13 +58,15 @@ class SpeedTest(unittest.TestCase):
         truth = start - 7.0 * 1.0  # the acceleration over 60 steps
         self.assertAlmostEqual(est.speed, truth, delta=0.4)
         for w in est.wheels:
-            self.assertAlmostEqual(w.slip, -0.2, delta=0.05)
+            self.assertAlmostEqual(w.slip, -0.2 * truth / (truth + self.c.est_slip_offset),
+                                   delta=0.05)
 
-    def test_slip_has_a_floor_at_low_speed(self):
+    def test_slip_is_over_the_speed_plus_physx_offset(self):
         est = self.run_for(0.5, lambda t: sensors(self.c, (1.0, 1.0, 3.0, 3.0)),
                            Activity(driving=True))
         self.assertAlmostEqual(est.speed, 1.0, delta=0.01)
-        self.assertAlmostEqual(est.wheels[2].slip, 2.0 / self.c.est_slip_floor, delta=0.01)
+        self.assertAlmostEqual(est.wheels[2].slip, 2.0 / (1.0 + self.c.est_slip_offset),
+                               delta=0.01)
 
     def test_reverse(self):
         est = self.run_for(0.5, lambda t: sensors(self.c, -3.0))

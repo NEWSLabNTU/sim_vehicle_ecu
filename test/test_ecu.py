@@ -98,12 +98,12 @@ class EcuTest(unittest.TestCase):
             force = 0.0
             for i in range(4):
                 for _ in range(8):
-                    s = (omega[i] * r - v) / max(v, 4.0)
+                    s = (omega[i] * r - v) / (v + 4.0)  # PhysX's slip
                     tire = max(-1.0, min(1.0, s * 4612.5 * 9.81 / fz)) * fz * mu
                     omega[i] = max(0.0, omega[i] + (-tire * r - act.brake[i]) / J * (DT / 8))
                 force += tire
                 if t > 0.5:  # past the first release, as a real ABS's first cycle
-                    worst = min(worst, (omega[i] * r - v) / max(v, 4.0))
+                    worst = min(worst, (omega[i] * r - v) / (v + 4.0))
             ax = force / c.mass
             v += ax * DT
             t += DT

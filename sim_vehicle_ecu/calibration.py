@@ -87,7 +87,7 @@ class Calibration:
     est_speed_gain: float = 15.0  # 1/s: the reference speed's pull toward the wheels
     est_speed_gain_slipping: float = 1.5  # 1/s: the same while ABS or TC works a wheel
     est_speed_gain_bound: float = 0.1  # 1/s: under ABS, down toward the fastest wheel
-    est_slip_floor: float = 4.0  # m/s: slip is over max(|v|, this), PhysX's active denominator
+    est_slip_offset: float = 4.0  # m/s: slip is over |v| + this, as PhysX's (its min denominator)
     est_sideslip_washout: float = 2.0  # s: the sideslip integral's leak toward 0
     est_mu_margin: float = 0.05  # added to the acceleration reached at the limit
     est_mu_floor: float = 0.1
