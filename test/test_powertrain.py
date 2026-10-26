@@ -328,3 +328,51 @@ class MakeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DifferentialTest(unittest.TestCase):
+    """Each driven axle's differential: open, locked (a spool), clutch-type LSD."""
+
+    def drive(self, m, left, right, accel=2.0, speed=10.0):
+        """The rear wheels' drive torques with the left rear spinning `left` rad/s and the
+        right rear `right`, after the motor has settled."""
+        r = m.c.wheel_radius
+        ws = [pt.Wheel(speed / r), pt.Wheel(speed / r), pt.Wheel(left), pt.Wheel(right)]
+        out = None
+        for _ in range(60):
+            out = m.torques(Request(acceleration=accel, velocity=40.0), speed, DT, ws)
+        return out.drive[2], out.drive[3]
+
+    def test_open_halves_whatever_the_wheels_do(self):
+        left, right = self.drive(ev(tc_enabled=False), 40.0, 27.0)
+        self.assertAlmostEqual(left, right)
+
+    def test_locked_moves_torque_to_the_slower_wheel_to_bring_them_together(self):
+        m = ev(diff_type="locked", tc_enabled=False)
+        left, right = self.drive(m, 30.0, 27.0)
+        inertia = 0.5 * m.c.wheel_mass * m.c.wheel_radius ** 2
+        # the left (faster) gives up what brings both to their mean in one step
+        self.assertAlmostEqual(right - left, 2 * inertia * 3.0 / (2 * DT), places=6)
+        self.assertGreater(right, left)
+        left, right = self.drive(m, 27.0, 27.0)
+        self.assertAlmostEqual(left, right)
+
+    def test_an_lsd_moves_at_most_its_preload_and_lock_share(self):
+        m = ev(diff_type="lsd", diff_preload=50.0, diff_power_lock=0.5, diff_coast_lock=0.25,
+               tc_enabled=False)
+        left, right = self.drive(m, 90.0, 27.0)
+        axle = left + right
+        self.assertAlmostEqual(right - left, 2 * (50.0 + 0.5 * axle), places=6)
+        # a small difference moves only what it takes, below the limit
+        left, right = self.drive(m, 27.02, 27.0)
+        inertia = 0.5 * m.c.wheel_mass * m.c.wheel_radius ** 2
+        self.assertAlmostEqual(right - left, 2 * inertia * 0.02 / (2 * DT), places=6)
+        # on the overrun (regen), the coast share
+        left, right = self.drive(m, 60.0, 27.0, accel=-1.0)
+        axle = left + right
+        self.assertLess(axle, 0)
+        self.assertAlmostEqual(right - left, 2 * (50.0 + 0.25 * abs(axle)), places=6)
+
+    def test_an_unknown_one_is_refused(self):
+        with self.assertRaises(ValueError):
+            ev(diff_type="viscous")

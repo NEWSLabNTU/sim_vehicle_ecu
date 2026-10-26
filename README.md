@@ -45,7 +45,7 @@ ecu.reset()            # a spawn or a teleport
 `Sensors` is None before the car has a reading (its first physics step). `spec.doc` is a
 loaded [sim_vehicle_spec](https://github.com/NEWSLabNTU/sim_vehicle_spec) spec's document
 (version 2); `Calibration.from_spec` reads its `geometry`, `inertia`, `wheels`, `tires`,
-`brakes` (with `abs`, and `esc` when there is one), `powertrain` (with `traction_control`),
+`brakes` (with `abs`, and `esc` when there is one), `powertrain` (with `traction_control` and `differential`),
 `resistance` and `steering`, and the defaults hold for the rest. The defaults are the shipped
 Tesla Model 3 RWD's, so `Calibration()` is that car.
 
@@ -57,7 +57,7 @@ Tesla Model 3 RWD's, so `Calibration()` is that car.
 | `calibration` | `Calibration`, from a spec and overrides |
 | `ecu` | `Ecu`: steering, estimates, ESC, powertrain, in that order every step |
 | `estimator` | reference speed, wheel slip, sideslip, friction, from the sensors |
-| `powertrain` | `ideal` (acb's contract on CARLA) and `ev` (the Model 3 RWD drive unit: motor envelope, regen blended with the friction brakes, EBD, ABS, traction control) |
+| `powertrain` | `ideal` (acb's contract on CARLA) and `ev` (the Model 3 RWD drive unit: motor envelope, regen blended with the friction brakes, EBD, ABS, traction control; each driven axle's differential: open, locked or a clutch-type LSD) |
 | `esc` | stability control: one wheel's brake and a motor cut against a yaw the tires cannot hold |
 | `brake` | the slip modulator ABS and traction control share |
 | `actuators` | the motor's envelope, first-order lags, the hydraulics' dead time, the steering actuator |

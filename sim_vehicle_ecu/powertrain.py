@@ -22,7 +22,8 @@ Models (`powertrain.model` in the spec):
   limited by its regen torque and power cap, fading out at low speed); the friction brakes
   cover the rest, through a hydraulic dead time and a first-order pressure lag, split by the
   dynamic axle load. ABS releases and reapplies each wheel's brake on its longitudinal slip;
-  traction control cuts motor torque when a driven wheel spins. No hidden speed loop: what
+  traction control cuts motor torque when a driven wheel spins. Each driven axle's
+  differential (`differential`) shares the axle torque between its wheels. No hidden speed loop: what
   the model cannot deliver, Autoware's longitudinal controller sees and corrects, as on a
   real car.
 - `physx` (reserved): PhysX's own DriveStandard (engine, gears, clutch, differential), with
@@ -47,6 +48,7 @@ from .signals import GEAR_NEUTRAL, GEAR_PARK, GEAR_REVERSE, IS_FRONT
 
 MODELS = ("ideal", "physx", "ev", "fmu")
 DRIVE_AXLES = ("rear", "front", "all")
+DIFFERENTIALS = ("open", "locked", "lsd")
 # Below this speed rolling resistance ramps to zero, so a standing car is not pushed about.
 ROLLING_RAMP = 0.5  # m/s
 
@@ -161,6 +163,8 @@ class EvPowertrain(Powertrain):
         c = calibration
         if c.drive_axle not in DRIVE_AXLES:
             raise ValueError(f"drive_axle {c.drive_axle!r}: one of {', '.join(DRIVE_AXLES)}")
+        if c.diff_type not in DIFFERENTIALS:
+            raise ValueError(f"diff_type {c.diff_type!r}: one of {', '.join(DIFFERENTIALS)}")
         for k in ("gear_ratio", "motor_peak_torque", "motor_peak_power", "motor_max_rpm"):
             if not getattr(c, k) > 0:
                 raise ValueError(f"ev powertrain: {k} must be positive")
@@ -252,7 +256,17 @@ class EvPowertrain(Powertrain):
         else:
             self.tc.step(0.0, dt, enabled=False)
         axle = direction * delivered * ratio
-        drive = tuple(axle * s for s in self.drive_share)
+        drive = list(axle * s for s in self.drive_share)
+        transfer = [0.0, 0.0]
+        if wheels:
+            for k, (a, b) in enumerate(((0, 1), (2, 3))):
+                if self.driven[a]:
+                    transfer[k] = self.differential(drive[a] + drive[b], direction,
+                                                    wheels[a].rotation_speed,
+                                                    wheels[b].rotation_speed, dt)
+                    drive[a] -= transfer[k]
+                    drive[b] += transfer[k]
+        drive = tuple(drive)
         # The friction brakes: dead time, then the pressure's first-order build-up, per axle.
         for i in range(2):
             delayed = self.brake_delay[i].step(friction[i], dt)
@@ -273,8 +287,27 @@ class EvPowertrain(Powertrain):
         self.debug = {"motor_torque": self.motor_torque, "delivered": delivered,
                       "motor_limit": limit, "omega": omega, "regen_force": regen_force,
                       "friction_request": friction, "pressure": tuple(self.pressure),
-                      "abs": tuple(m.factor for m in self.abs), "tc": self.tc.factor}
+                      "abs": tuple(m.factor for m in self.abs), "tc": self.tc.factor,
+                      "diff_transfer": tuple(transfer)}
         return Torques(drive, tuple(brake))
+
+    def differential(self, axle_torque, direction, spin_left, spin_right, dt):
+        """The torque (N m) an axle's differential moves from its left wheel to its right one,
+        both wheels spinning at `spin_left` and `spin_right` (rad/s) under `axle_torque` along
+        the gear's `direction`. A locked axle takes the torque that brings the two wheels to
+        one speed within the step (their inertia only: the tires act in the physics); a
+        clutch-type LSD at most its preload plus its lock share of the axle torque, the power
+        share under drive, the coast share on the overrun; an open one none."""
+        c = self.c
+        if c.diff_type == "open":
+            return 0.0
+        inertia = 0.5 * c.wheel_mass * c.wheel_radius ** 2
+        want = inertia * (spin_left - spin_right) / (2 * dt)
+        if c.diff_type == "locked":
+            return want
+        lock = c.diff_power_lock if axle_torque * direction >= 0 else c.diff_coast_lock
+        limit = c.diff_preload + lock * abs(axle_torque)
+        return max(-limit, min(limit, want))
 
     def split_friction(self, brake, regen, decel):
         """Per wheel friction torque (front, rear) for a total braking force `brake` (N) of

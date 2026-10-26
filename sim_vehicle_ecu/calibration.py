@@ -33,6 +33,13 @@ class Calibration:
     max_drive_torque: float = 1500.0  # per wheel, N m (ideal)
     drive_axle: str = "rear"  # rear | front | all
     front_drive_share: float = 0.0  # the front axle's share of motor torque when "all"
+    # Each driven axle's differential (ev): open, locked (a spool) or lsd (clutch type: up to
+    # diff_preload N m plus diff_power_lock / diff_coast_lock of the axle torque moves from
+    # the faster wheel to the slower one, under drive / on the overrun)
+    diff_type: str = "open"
+    diff_preload: float = 0.0
+    diff_power_lock: float = 0.0
+    diff_coast_lock: float = 0.0
     gear_ratio: float = 10.0  # motor to wheel, single speed
     motor_peak_torque: float = 340.0  # N m at the motor shaft
     motor_peak_power: float = 194000.0  # W
@@ -131,6 +138,7 @@ def spec_values(doc):
     abs_ = b.get("abs") or {}
     esc = b.get("esc") or {}
     tc = p.get("traction_control") or {}
+    diff = p.get("differential") or {}
     st = doc.get("steering") or {}
     base = Calibration()
     values = dict(
@@ -164,6 +172,8 @@ def spec_values(doc):
         values[key] = p.get(key, getattr(base, key))
     fade = p.get("regen_fade_speeds", (base.regen_fade_low, base.regen_fade_high))
     values["regen_fade_low"], values["regen_fade_high"] = fade
+    for key in ("type", "preload", "power_lock", "coast_lock"):
+        values[f"diff_{key}"] = diff.get(key, getattr(base, f"diff_{key}"))
     for key, field in (("enabled", "tc_enabled"), ("slip_limit", "tc_slip_limit"),
                        ("slip_reapply", "tc_slip_reapply"), ("release_rate", "tc_release_rate"),
                        ("apply_rate", "tc_apply_rate")):

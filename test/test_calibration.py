@@ -50,6 +50,16 @@ class FromSpecTest(unittest.TestCase):
         self.assertFalse(c.tc_enabled)
         self.assertEqual(c.steer_time_constant, 0.1)
 
+    def test_the_differential_is_open_unless_the_spec_names_another(self):
+        self.assertEqual(Calibration.from_spec(MODEL3).diff_type, "open")
+        doc = copy.deepcopy(MODEL3)
+        doc["powertrain"]["differential"] = {"type": "lsd", "preload": 80, "power_lock": 0.4,
+                                             "coast_lock": 0.2}
+        c = Calibration.from_spec(doc)
+        self.assertEqual((c.diff_type, c.diff_preload, c.diff_power_lock, c.diff_coast_lock),
+                         ("lsd", 80.0, 0.4, 0.2))
+        self.assertIsInstance(c.diff_preload, float)
+
     def test_esc_is_off_unless_the_spec_has_it(self):
         self.assertFalse(Calibration.from_spec(MODEL3).esc_enabled)
         doc = copy.deepcopy(MODEL3)
