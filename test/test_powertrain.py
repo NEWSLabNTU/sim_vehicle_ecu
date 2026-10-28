@@ -326,21 +326,22 @@ class MakeTest(unittest.TestCase):
             ev(drive_axle="middle")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DifferentialTest(unittest.TestCase):
     """Each driven axle's differential: open, locked (a spool), clutch-type LSD."""
 
-    def drive(self, m, left, right, accel=2.0, speed=10.0):
+    def drive(self, m, left, right, accel=2.0, speed=10.0, steps=1):
         """The rear wheels' drive torques with the left rear spinning `left` rad/s and the
-        right rear `right`, after the motor has settled."""
+        right rear `right` for `steps` steps, after the motor has settled with both at
+        `right` (so the coupling's spring starts unwound)."""
         r = m.c.wheel_radius
-        ws = [pt.Wheel(speed / r), pt.Wheel(speed / r), pt.Wheel(left), pt.Wheel(right)]
-        out = None
+        cmd = Request(acceleration=accel, velocity=40.0)
+        m.reset()
+        even = [pt.Wheel(speed / r), pt.Wheel(speed / r), pt.Wheel(right), pt.Wheel(right)]
+        ws = even[:2] + [pt.Wheel(left), pt.Wheel(right)]
         for _ in range(60):
-            out = m.torques(Request(acceleration=accel, velocity=40.0), speed, DT, ws)
+            m.torques(cmd, speed, DT, even)
+        for _ in range(steps):
+            out = m.torques(cmd, speed, DT, ws)
         return out.drive[2], out.drive[3]
 
     def test_open_halves_whatever_the_wheels_do(self):
@@ -356,6 +357,15 @@ class DifferentialTest(unittest.TestCase):
         self.assertGreater(right, left)
         left, right = self.drive(m, 27.0, 27.0)
         self.assertAlmostEqual(left, right)
+
+    def test_locked_winds_up_while_the_wheels_stay_apart(self):
+        """Wheels the tires hold apart: the spring adds I / (4 dt^2) per rad between them,
+        from the step after the one they parted in."""
+        m = ev(diff_type="locked", tc_enabled=False)
+        inertia = 0.5 * m.c.wheel_mass * m.c.wheel_radius ** 2
+        left, right = self.drive(m, 27.3, 27.0, steps=10)
+        step = inertia * 0.3 / (2 * DT)
+        self.assertAlmostEqual((right - left) / 2, step + 9 * step / 2, places=6)
 
     def test_an_lsd_moves_at_most_its_preload_and_lock_share(self):
         m = ev(diff_type="lsd", diff_preload=50.0, diff_power_lock=0.5, diff_coast_lock=0.25,
@@ -376,3 +386,55 @@ class DifferentialTest(unittest.TestCase):
     def test_an_unknown_one_is_refused(self):
         with self.assertRaises(ValueError):
             ev(diff_type="viscous")
+
+
+class SpoolInACornerTest(unittest.TestCase):
+    """A locked axle in a steady corner, against the tires: two rear wheels on a linear tire
+    (the shipped spec's longitudinal stiffness), the inner wheel's ground slower by the track
+    over the radius. A spool holds both at one speed, so their slips differ by about t/R;
+    the tires' scrub pulls them apart, and the coupling must hold against it (issue 022)."""
+
+    SUBSTEPS = 16  # the plant's, per controller step (PhysX's vehicle substeps 8)
+
+    def corner(self, m, speed=11.0, radius=40.0, seconds=4.0):
+        c = m.c
+        r = c.wheel_radius
+        inertia = 0.5 * c.wheel_mass * r * r
+        stiff = LONG_STIFF * G  # N per unit slip
+        half = c.wheel_tread / (2 * radius)
+        ground = (speed * (1 - half), speed * (1 + half))  # the inner (left) wheel's slower
+        spin = [g / r for g in ground]
+        h = DT / self.SUBSTEPS
+        cmd = Request(acceleration=0.3, velocity=40.0)
+        for _ in range(round(seconds / DT)):
+            slips = [(w * r - g) / g for w, g in zip(spin, ground)]
+            ws = [pt.Wheel(speed / r), pt.Wheel(speed / r)] + [
+                pt.Wheel(w, s) for w, s in zip(spin, slips)]
+            drive = m.torques(cmd, speed, DT, ws).drive[2:]
+            for _ in range(self.SUBSTEPS):
+                for i in range(2):
+                    force = stiff * (spin[i] * r - ground[i]) / ground[i]
+                    spin[i] += h * (drive[i] - force * r) / inertia
+        slips = [(w * r - g) / g for w, g in zip(spin, ground)]
+        mean = sum(spin) / 2
+        spool = mean * r * (1 / ground[0] - 1 / ground[1])  # both at the mean speed
+        return (slips[0] - slips[1]) / spool
+
+    def test_a_spool_holds_the_wheels_together_against_the_tires(self):
+        lock = self.corner(ev(diff_type="locked", tc_enabled=False))
+        self.assertGreater(lock, 0.95)
+        self.assertLess(lock, 1.05)
+
+    def test_an_open_axle_lets_them_roll_apart(self):
+        lock = self.corner(ev(diff_type="open", tc_enabled=False))
+        self.assertLess(abs(lock), 0.05)
+
+    def test_at_every_speed_of_the_ramp(self):
+        for speed in (6.5, 11.0, 15.4, 19.5):
+            with self.subTest(speed=speed):
+                lock = self.corner(ev(diff_type="locked", tc_enabled=False), speed=speed)
+                self.assertGreater(lock, 0.95)
+
+
+if __name__ == "__main__":
+    unittest.main()

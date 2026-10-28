@@ -189,6 +189,7 @@ class EvPowertrain(Powertrain):
             m.reset()
         self.tc.reset()
         self.abs_event = False  # ABS has worked a wheel in this stop: no regen until it ends
+        self.wind = [0.0, 0.0]  # per axle (front, rear): the coupling's held torque, N m
         self.debug = {}
 
     @property
@@ -263,7 +264,7 @@ class EvPowertrain(Powertrain):
                 if self.driven[a]:
                     transfer[k] = self.differential(drive[a] + drive[b], direction,
                                                     wheels[a].rotation_speed,
-                                                    wheels[b].rotation_speed, dt)
+                                                    wheels[b].rotation_speed, dt, k)
                     drive[a] -= transfer[k]
                     drive[b] += transfer[k]
         drive = tuple(drive)
@@ -291,23 +292,39 @@ class EvPowertrain(Powertrain):
                       "diff_transfer": tuple(transfer)}
         return Torques(drive, tuple(brake))
 
-    def differential(self, axle_torque, direction, spin_left, spin_right, dt):
+    def differential(self, axle_torque, direction, spin_left, spin_right, dt, axle=1):
         """The torque (N m) an axle's differential moves from its left wheel to its right one,
         both wheels spinning at `spin_left` and `spin_right` (rad/s) under `axle_torque` along
-        the gear's `direction`. A locked axle takes the torque that brings the two wheels to
-        one speed within the step (their inertia only: the tires act in the physics); a
-        clutch-type LSD at most its preload plus its lock share of the axle torque, the power
-        share under drive, the coast share on the overrun; an open one none."""
+        the gear's `direction`; `axle` 0 front, 1 rear. A locked axle takes the torque that
+        holds the two wheels at one speed; a clutch-type LSD the same, up to its preload plus
+        its lock share of the axle torque (the power share under drive, the coast share on the
+        overrun); an open one none.
+
+        Holding them at one speed takes, beside the torque that brings them together within the
+        step against their inertia, I (w_left - w_right) / (2 dt), the torque the tires' scrub
+        pulls them apart with, which this unit does not measure. So the coupling is a stiff
+        shaft: the inertia's share as its damping, and the speed difference integrated (the
+        wheels' angle between them) as its spring, I / (4 dt^2) N m per rad: at dt its stiffest
+        that stays damped when the tires carry nothing (both sliding). In a steady corner the
+        spring winds up to the scrub torque and the wheels turn at one speed (issue 022: the
+        damping alone held a tenth of a spool's slip difference). The spring holds at most the
+        axle's tires' grip, and a slipping LSD's clutch holds no more than it moves."""
         c = self.c
         if c.diff_type == "open":
             return 0.0
         inertia = 0.5 * c.wheel_mass * c.wheel_radius ** 2
-        want = inertia * (spin_left - spin_right) / (2 * dt)
-        if c.diff_type == "locked":
-            return want
-        lock = c.diff_power_lock if axle_torque * direction >= 0 else c.diff_coast_lock
-        limit = c.diff_preload + lock * abs(axle_torque)
-        return max(-limit, min(limit, want))
+        gap = spin_left - spin_right
+        damping = inertia * gap / (2 * dt)
+        grip = c.tire_friction * c.mass * G * c.wheel_radius / 2
+        want = damping + self.wind[axle]
+        wind = max(-grip, min(grip, self.wind[axle] + inertia * gap / (4 * dt)))
+        if c.diff_type == "lsd":
+            lock = c.diff_power_lock if axle_torque * direction >= 0 else c.diff_coast_lock
+            limit = c.diff_preload + lock * abs(axle_torque)
+            want = max(-limit, min(limit, want))
+            wind = max(-limit, min(limit, wind))
+        self.wind[axle] = wind
+        return want
 
     def split_friction(self, brake, regen, decel):
         """Per wheel friction torque (front, rear) for a total braking force `brake` (N) of
