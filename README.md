@@ -73,13 +73,21 @@ speeds, the acceleration sensor), never the simulator's:
 - **Slip control on regen.** The regen beyond the driven axle's share of the brakes (by the
   brake distribution) is cut while a driven wheel slips, by the modulator ABS and TC use, and
   the friction brakes take what it gives up. Regen within the axle's own share is left alone:
-  cutting it would only hand it to the same axle's friction brakes. It releases past
-  `regen_slip_release` (0.25), or when a driven wheel runs away: past `regen_runaway_slip`
-  (0.06), slowing `regen_runaway_decel` (3 g) faster than the car, and its axle carrying
-  `regen_runaway_deficit` (30 %) less than the brakes put on it -- a tyre past its peak, on any
-  road (ice peaks at 0.05, asphalt at 0.25). Each of the three alone also fires on dry asphalt
-  (a wheel taking up a new torque, or coming down from a wheelspin), the three together did not
-  on Haruna or Tsukuba. A locked axle's slip is its two wheels' mean.
+  cutting it would only hand it to the same axle's friction brakes. It releases on a lost grip:
+  a driven wheel running away (past `regen_runaway_slip`, 0.06, slowing `regen_runaway_decel`,
+  3 g, faster than the car, and its axle carrying `regen_runaway_deficit`, 30 %, less than the
+  brakes put on it) -- a tyre past its peak, on any road (ice peaks at 0.05, asphalt at 0.25) --
+  or a driven wheel past `regen_slip_release` (0.25) whose axle is that short or whose slip is
+  still growing (slowing `regen_slip_growth`, 1 g, faster than the car: a tyre that keeps its
+  force past the peak still locks when the brakes ask more than it carries). A slip alone is
+  not one: wet mud's tyre peaks at 0.2 and keeps its force past it, so a rear braking at 0.3
+  slip there holds it, carrying what the brakes put on it, and cutting regen would only move
+  the braking to the front (autoware-drift issue 011). Once released, the slip alone, as ABS.
+  The car's deceleration lags a reversal of the tyres' force, so neither test is read until
+  the driven wheels have been out of a drive slip for `regen_spin_settle` (0.1 s): a wheel
+  coming down from a wheelspin into regen slows as fast as a runaway one. Each test alone also
+  fires on dry asphalt (a wheel taking up a new torque, or coming down from a wheelspin),
+  together they did not on Haruna or Tsukuba. A locked axle's slip is its two wheels' mean.
 - **The axle's grip found.** During a slip event the axle's tyre force is measured from the
   wheels' own balance (brake and regen torque and the driveline's drag, less what the wheels'
   inertia gives up), which does not lag the tyre as the car's deceleration does; the event's
@@ -91,8 +99,8 @@ speeds, the acceleration sensor), never the simulator's:
 On a grippy road regen never slips the driven axle, so none of it acts and the car is the one
 before, bit for bit. `regen_slip_control: false` turns it off; a spec may set the fields in
 `powertrain.regen_slip_control` (`enabled`, `slip_release`, `slip_reapply`, `runaway_slip`,
-`runaway_decel`, `runaway_deficit`, `release_rate`, `apply_rate`, `grip_share`,
-`mu_recover_rate`).
+`runaway_decel`, `runaway_deficit`, `slip_growth`, `spin_settle`, `release_rate`,
+`apply_rate`, `grip_share`, `mu_recover_rate`).
 
 ## Develop
 

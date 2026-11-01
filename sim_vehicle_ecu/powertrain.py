@@ -219,6 +219,7 @@ class EvPowertrain(Powertrain):
         self.regen_capped = False  # last step's regen was held at the cap
         self.regen_excess = False  # last step's regen asked beyond the driven axle's share
         self.last_spins = None  # the driven wheels' peripheral speeds last step, m/s
+        self.since_spin = math.inf  # s since the driven wheels were last in a drive slip
         self.abs_event = False  # ABS has worked a wheel in this stop: no regen until it ends
         self.wind = [0.0, 0.0]  # per axle (front, rear): the coupling's held torque, N m
         self.debug = {}
@@ -390,18 +391,39 @@ class EvPowertrain(Powertrain):
         # alone also fires on a grippy road: a wheel taking up a new brake torque, or coming
         # down from a wheelspin, slows as fast for a few steps, but the car then decelerates
         # with it. Released as if past the release slip.
-        runaway = False
+        # A slip past the release slip starts a release only when the axle has lost its grip
+        # there: short of its brakes, or its wheels still slowing faster than the car by
+        # regen_slip_growth (a tyre past its peak whose force does not fall still locks if the
+        # brakes ask more than it carries: a quarter of asphalt's friction, 15 % short, the
+        # wheel 2 g faster). On a road whose tyre peaks late and keeps its force (wet mud's peak
+        # at 0.2, sliding share 1) a driven wheel braking at 0.3 slip holds there carrying what
+        # the brakes put on it (issue 011: 0.92 of it, the wheel 0.27 g faster than the car in
+        # a braking drift), and cutting or holding regen only moves the braking to the other
+        # axle. Once released, the slip alone, as ABS. Without an acceleration reading, the
+        # slip alone.
+        # The car's deceleration lags a reversal of the driven tyres' force: a wheel coming
+        # down from a wheelspin into regen crosses the road's speed and slows 4-7 g faster
+        # than a car still pushed by that tyre a moment ago (wet mud, issue 011: every slip
+        # event there, its grip read at the floor). So neither test until the driven wheels
+        # have been out of a drive slip for regen_spin_settle.
+        self.since_spin = 0.0 if lock < -c.regen_slip_reapply else self.since_spin + dt
+        settled = self.since_spin >= c.regen_spin_settle
+        short = carried is None or (settled
+                                    and carried < (1.0 - c.regen_runaway_deficit) * applied)
+        runaway = growing = False
         rate = None  # the driven wheels' mean peripheral acceleration, m/s^2
         if spins and self.last_spins and len(spins) == len(self.last_spins):
             rates = [(u - u0) / dt for u, u0 in zip(spins, self.last_spins)]
             rate = sum(rates) / len(rates)
-            runaway = (carried is not None and lock > c.regen_runaway_slip
-                       and min(rates) < direction * accel - c.regen_runaway_decel
-                       and carried < (1.0 - c.regen_runaway_deficit) * applied)
+            if carried is not None:
+                slower = direction * accel - min(rates)  # the wheels' deceleration past the car's
+                runaway = short and lock > c.regen_runaway_slip and slower > c.regen_runaway_decel
+                growing = settled and slower > c.regen_slip_growth
         self.last_spins = spins
-        limit = runaway or lock > c.regen_slip_release
-        self.rsc.step(max(lock, c.regen_slip_release + 1e-6) if runaway else lock, dt,
-                      enabled=on and regen)
+        slipped = lock > c.regen_slip_release and (short or growing or self.rsc.active)
+        limit = runaway or slipped
+        self.rsc.step(max(lock, c.regen_slip_release + 1e-6) if limit
+                      else min(lock, c.regen_slip_release), dt, enabled=on and regen)
         if not on or accel is None:
             self.slip_event = False
             return

@@ -79,6 +79,10 @@ class Calibration:
     regen_runaway_decel: float = 29.4  # m/s^2 (3 g) slowing this much faster than the car, its
     regen_runaway_deficit: float = 0.3  # axle carrying this share less than the brakes put on
     # it, is past its tyre's peak (running away): released as past the release slip
+    regen_slip_growth: float = 9.81  # m/s^2: past the release slip, a driven wheel slowing this
+    # much faster than the car (its slip still growing), or its axle short as above, has lost
+    # its grip; a slip alone has not (a late-peaking tyre holds it)
+    regen_spin_settle: float = 0.1  # s out of a drive slip before either is read
     regen_release_rate: float = 20.0  # 1/s, of the regen factor
     regen_apply_rate: float = 5.0  # 1/s
     regen_grip_share: float = 0.7  # regen at most this share of the driven axle's grip found
@@ -199,6 +203,8 @@ def spec_values(doc):
                        ("runaway_slip", "regen_runaway_slip"),
                        ("runaway_decel", "regen_runaway_decel"),
                        ("runaway_deficit", "regen_runaway_deficit"),
+                       ("slip_growth", "regen_slip_growth"),
+                       ("spin_settle", "regen_spin_settle"),
                        ("release_rate", "regen_release_rate"), ("apply_rate", "regen_apply_rate"),
                        ("grip_share", "regen_grip_share"),
                        ("mu_recover_rate", "regen_mu_recover_rate")):
