@@ -21,7 +21,12 @@ Models (`powertrain.model` in the spec):
   first-order torque lag. Deceleration is regenerative first (the motor as a generator,
   limited by its regen torque and power cap, fading out at low speed); the friction brakes
   cover the rest, through a hydraulic dead time and a first-order pressure lag, split by the
-  dynamic axle load. ABS releases and reapplies each wheel's brake on its longitudinal slip;
+  dynamic axle load. Regen is the brake module's to blend, as on a real EV: the driven wheels'
+  braking slip cuts it (regen slip control, the modulator ABS uses, on the motor's torque) and
+  the friction brakes take what it gives up, by the brake distribution; and once a slip has
+  shown the driven axle's grip, regen stays within a share of it (`regen_grip_share`) until
+  that is forgotten (`regen_mu_recover_rate`), so a car on ice does not brake through its
+  driven axle alone. ABS releases and reapplies each wheel's brake on its longitudinal slip;
   traction control cuts motor torque when a driven wheel spins. Each driven axle's
   differential (`differential`) shares the axle torque between its wheels. No hidden speed loop: what
   the model cannot deliver, Autoware's longitudinal controller sees and corrects, as on a
@@ -51,6 +56,9 @@ DRIVE_AXLES = ("rear", "front", "all")
 DIFFERENTIALS = ("open", "locked", "lsd")
 # Below this speed rolling resistance ramps to zero, so a standing car is not pushed about.
 ROLLING_RAMP = 0.5  # m/s
+# The driven axle's friction found in a slip event follows its measure with this, s (the
+# estimator's MU_TIME_CONSTANT: the wheel speeds' differences are a step's).
+AXLE_MU_TIME_CONSTANT = 0.1
 
 
 class Torques(NamedTuple):
@@ -103,18 +111,32 @@ def regen_limit(c, omega, speed):
     return t
 
 
+def axle_load_share(c, front_share, accel):
+    """The share of the car's weight on the axle(s) a drive of `front_share` (the front
+    axle's share of the motor's torque) turns, at the longitudinal acceleration `accel` (m/s^2,
+    the body's): the static split by the centre of mass, shifted forward under braking."""
+    front = (c.com[0] - c.com[2] * accel / G) / c.wheel_base
+    front = min(max(front, 0.05), 0.95)
+    if 0.0 < front_share < 1.0:
+        return 1.0
+    return front if front_share >= 1.0 else 1.0 - front
+
+
 class Powertrain:
-    """The interface: `torques(req, speed, dt, wheels=None, esc=None) -> Torques`. `speed` is
-    the car's forward speed (m/s), `wheels` the four `Wheel`s (None: none known yet), `esc`
-    the stability control's request (`sim_vehicle_ecu.esc`), which only `ev` acts on: `ideal`
-    has no brake hydraulics or ABS to put it through."""
+    """The interface: `torques(req, speed, dt, wheels=None, esc=None, accel=None) -> Torques`.
+    `speed` is the car's forward speed (m/s), `wheels` the four `Wheel`s (None: none known yet),
+    `esc` the stability control's request (`sim_vehicle_ecu.esc`), which only `ev` acts on:
+    `ideal` has no brake hydraulics or ABS to put it through; `accel` the acceleration sensor's
+    longitudinal reading (m/s^2; None: none yet), which `ev`'s regen slip control takes the
+    axle loads and a runaway wheel's deficit from."""
 
     name = ""
 
     def __init__(self, calibration):
         self.c = calibration
 
-    def torques(self, req, speed, dt, wheels=None, esc=None):  # pragma: no cover - interface
+    def torques(self, req, speed, dt, wheels=None, esc=None,
+                accel=None):  # pragma: no cover - interface
         raise NotImplementedError
 
     def reset(self):
@@ -133,7 +155,7 @@ def _direction(req):
 class IdealPowertrain(Powertrain):
     name = "ideal"
 
-    def torques(self, req, speed, dt, wheels=None, esc=None):
+    def torques(self, req, speed, dt, wheels=None, esc=None, accel=None):
         c = self.c
         r = c.wheel_radius
         if _holding(req, speed):
@@ -178,6 +200,8 @@ class EvPowertrain(Powertrain):
                                   c.abs_release_rate, c.abs_apply_rate) for _ in range(4)]
         self.tc = SlipModulator(c.tc_slip_limit, c.tc_slip_reapply,
                                 c.tc_release_rate, c.tc_apply_rate)
+        self.rsc = SlipModulator(c.regen_slip_release, c.regen_slip_reapply,
+                                 c.regen_release_rate, c.regen_apply_rate)
         self.reset()
 
     def reset(self):
@@ -188,14 +212,21 @@ class EvPowertrain(Powertrain):
         for m in self.abs:
             m.reset()
         self.tc.reset()
+        self.rsc.reset()
+        self.axle_mu = None  # the driven axle's friction a regen slip showed (None: not known)
+        self.mu_measured = None  # its measure in this slip event, smoothed
+        self.slip_event = False  # a driven wheel has slipped under regen, the modulator still on
+        self.regen_capped = False  # last step's regen was held at the cap
+        self.regen_excess = False  # last step's regen asked beyond the driven axle's share
+        self.last_spins = None  # the driven wheels' peripheral speeds last step, m/s
         self.abs_event = False  # ABS has worked a wheel in this stop: no regen until it ends
         self.wind = [0.0, 0.0]  # per axle (front, rear): the coupling's held torque, N m
         self.debug = {}
 
     @property
     def slipping(self):
-        """ABS or traction control is working a wheel."""
-        return self.tc.active or any(m.active for m in self.abs)
+        """ABS, traction control or the regen slip control is working a wheel."""
+        return self.tc.active or self.rsc.active or any(m.active for m in self.abs)
 
     def motor_speed(self, speed, wheels):
         """Motor shaft speed, rad/s: the driven wheels' mean spin (the car's speed when the
@@ -207,15 +238,19 @@ class EvPowertrain(Powertrain):
             wheel = speed / self.c.wheel_radius
         return wheel * self.c.gear_ratio
 
-    def torques(self, req, speed, dt, wheels=None, esc=None):
+    def torques(self, req, speed, dt, wheels=None, esc=None, accel=None):
         """`esc`: a `sim_vehicle_ecu.esc.EscOut` of this step, its brake added to each wheel's
-        ahead of ABS and its factor on the motor's torque."""
+        ahead of ABS and its factor on the motor's torque; `accel`: the longitudinal
+        acceleration sensor's reading."""
         c = self.c
         r, ratio = c.wheel_radius, c.gear_ratio
         direction = _direction(req)
         omega = self.motor_speed(speed, wheels)
         hold = _holding(req, speed)
         regen_force = 0.0
+        cap = None
+        self.regen_slip(direction, speed, wheels, accel, hold, dt)
+        self.regen_capped = self.regen_excess = False
         friction = (0.0, 0.0)  # per wheel friction torque requests, front and rear axle
         if hold or req.gear == GEAR_NEUTRAL or abs(speed) < c.abs_min_speed:
             self.abs_event = False
@@ -238,10 +273,23 @@ class EvPowertrain(Powertrain):
                     self.abs_event = True
                 available = 0.0 if self.abs_event else regen_limit(c, omega, speed)
                 regen_force = min(brake, available * ratio / r)
-                request = -regen_force * r / ratio
                 # The axle split follows the deceleration the car can reach: an EBD works
                 # from the measured deceleration, which the tires cap near mu g.
                 decel = min(-req.acceleration, c.tire_friction * G)
+                # The regen slip control, on the regen beyond the driven axle's share of the
+                # brakes (below it, regen only stands in for that axle's friction brakes and
+                # cutting it would not unload the axle): held within the driven axle's grip
+                # once that is known, and cut while the driven wheels slip; the friction
+                # brakes take the rest.
+                own = self.regen_share(brake, decel)
+                self.regen_excess = regen_force > own
+                cap = self.regen_cap(accel)
+                if cap is not None and regen_force > max(cap, own):
+                    regen_force = max(cap, own)
+                    self.regen_capped = True
+                if regen_force > own and self.rsc.factor < 1.0:
+                    regen_force = own + (regen_force - own) * self.rsc.factor
+                request = -regen_force * r / ratio
                 friction = self.split_friction(brake, regen_force, decel)
         # The motor: the inverter's torque lag, within the envelope at the present speed.
         limit = motor_limit(c, omega)
@@ -289,8 +337,130 @@ class EvPowertrain(Powertrain):
                       "motor_limit": limit, "omega": omega, "regen_force": regen_force,
                       "friction_request": friction, "pressure": tuple(self.pressure),
                       "abs": tuple(m.factor for m in self.abs), "tc": self.tc.factor,
-                      "diff_transfer": tuple(transfer)}
+                      "diff_transfer": tuple(transfer), "regen_factor": self.rsc.factor,
+                      "regen_cap": cap, "axle_mu": self.axle_mu}
         return Torques(drive, tuple(brake))
+
+    def regen_slip(self, direction, speed, wheels, accel, hold, dt):
+        """One step of the regen slip control's modulator and of the driven axle's friction it
+        has found (`axle_mu`), from the wheels' speeds and slips and the acceleration sensor.
+
+        The modulator works while the motor regenerates (its torque against the gear's
+        direction) beyond the driven axle's share of the brakes, on the driven wheels' worst
+        braking slip (a locked axle's: its two wheels' mean), as ABS works a wheel's brake: it
+        releases past the release slip or when a driven wheel runs away (below), and reapplies
+        within the reapply slip. From such a release until the modulator lets go is a slip
+        event: the axle is at its limit, and what it carries is its grip. Between events the
+        friction found is never held below what the axle carries without slipping, and is
+        forgotten at `regen_mu_recover_rate` (1/s) while regen asks less than it allows, up to
+        the design friction, where it is unknown again."""
+        c = self.c
+        on = (c.regen_slip_control and wheels is not None and not hold
+              and abs(speed) > c.abs_min_speed)
+        regen = self.motor_torque < 0 and self.regen_excess
+        lock = 0.0
+        spins = None
+        if wheels:
+            slips = [-direction * w.slip for w, d in zip(wheels, self.driven) if d]
+            spins = [direction * w.rotation_speed * c.wheel_radius
+                     for w, d in zip(wheels, self.driven) if d]
+            # a spool turns its wheels at one speed, so in a turn the inner one reads a braking
+            # slip and the outer a driving one: the axle's own is their mean
+            if c.diff_type == "locked":
+                lock, spins = sum(slips) / len(slips), [sum(spins) / len(spins)]
+            else:
+                lock = max(slips)
+        # The driven axle's braking force as the car's deceleration shows it (the body's mass
+        # times it, less the road load and the undriven axle's friction brakes), and as the
+        # brakes put it on (the motor's regen and the axle's own friction brakes).
+        carried = applied = None
+        if accel is not None:
+            fs = self.front_share
+            undriven = 0.0 if 0.0 < fs < 1.0 else 2 * self.pressure[
+                1 if fs >= 1.0 else 0] / c.wheel_radius
+            carried = (road_load(c, direction * speed) - c.mass * direction * accel
+                       - undriven)
+            own = self.pressure[0] + self.pressure[1] if 0.0 < fs < 1.0 else self.pressure[
+                0 if fs >= 1.0 else 1]
+            applied = (-self.motor_torque * c.gear_ratio + 2 * own) / c.wheel_radius
+        # A driven wheel running away, its tyre past the peak whatever the road's (ice's peaks
+        # at 0.05, asphalt's at 0.25): past regen_runaway_slip, slowing faster than the car by
+        # regen_runaway_decel (a Bosch ABS's wheel deceleration threshold), and the axle
+        # carrying less than regen_runaway_deficit short of what the brakes put on it. Each
+        # alone also fires on a grippy road: a wheel taking up a new brake torque, or coming
+        # down from a wheelspin, slows as fast for a few steps, but the car then decelerates
+        # with it. Released as if past the release slip.
+        runaway = False
+        rate = None  # the driven wheels' mean peripheral acceleration, m/s^2
+        if spins and self.last_spins and len(spins) == len(self.last_spins):
+            rates = [(u - u0) / dt for u, u0 in zip(spins, self.last_spins)]
+            rate = sum(rates) / len(rates)
+            runaway = (carried is not None and lock > c.regen_runaway_slip
+                       and min(rates) < direction * accel - c.regen_runaway_decel
+                       and carried < (1.0 - c.regen_runaway_deficit) * applied)
+        self.last_spins = spins
+        limit = runaway or lock > c.regen_slip_release
+        self.rsc.step(max(lock, c.regen_slip_release + 1e-6) if runaway else lock, dt,
+                      enabled=on and regen)
+        if not on or accel is None:
+            self.slip_event = False
+            return
+        weight = axle_load_share(c, self.front_share, accel) * c.mass * G
+        if regen and limit and not self.slip_event:
+            self.slip_event = True
+            self.mu_measured = None
+        if self.slip_event:
+            # The axle's grip through the event: the force its tyres put on the road, from
+            # the wheels' own balance (what the brakes and the driveline's drag hold them back
+            # with, less what their inertia gives up as they slow: I u' / r^2), which, unlike
+            # the car's deceleration, does not lag the tyre. Smoothed, and the event's highest
+            # held as the axle's friction found (the first of an event replaces the last's:
+            # the road may have changed), regen within its share of it at once.
+            if self.motor_torque < 0 and rate is not None:
+                n, r2 = sum(self.driven), c.wheel_radius ** 2
+                spin = sum(spins) / len(spins)
+                force = applied + n * (c.wheel_damping_rate * spin
+                                       + 0.5 * c.wheel_mass * r2 * rate) / r2
+                mu = max(force, 0.0) / weight
+                if self.mu_measured is None:
+                    self.mu_measured = self.axle_mu = max(mu, c.est_mu_floor)
+                else:
+                    self.mu_measured += (mu - self.mu_measured) * (
+                        1 - math.exp(-dt / AXLE_MU_TIME_CONSTANT))
+                    self.axle_mu = max(self.axle_mu, self.mu_measured)
+            if self.rsc.active:
+                return
+            self.slip_event = False
+        if self.axle_mu is None:
+            return
+        if not self.regen_capped:
+            self.axle_mu += c.regen_mu_recover_rate * dt
+        if regen and lock < c.regen_slip_reapply:
+            self.axle_mu = max(self.axle_mu, applied / weight)
+        if self.axle_mu >= c.tire_friction:
+            self.axle_mu = None
+
+    def regen_share(self, brake, decel):
+        """The most regen (N at the tyres) that stays within the driven axle(s)' share of a
+        braking force `brake` at `decel` by the brake distribution: regen beyond it is what
+        brakes the driven axle harder than the distribution would (split_friction takes it off
+        the other axle's friction)."""
+        share = self.c.brake_split(decel)
+        s = self.front_share
+        if s >= 1.0:
+            return brake * share
+        if s <= 0.0:
+            return brake * (1 - share)
+        return min(brake * share / s, brake * (1 - share) / (1 - s))
+
+    def regen_cap(self, accel):
+        """The most regen (N at the tyres) the driven axle's friction found allows at the
+        body's acceleration `accel`: `regen_grip_share` of its grip; None when not known."""
+        c = self.c
+        if self.axle_mu is None or accel is None:
+            return None
+        share = axle_load_share(c, self.front_share, accel)
+        return c.regen_grip_share * self.axle_mu * share * c.mass * G
 
     def differential(self, axle_torque, direction, spin_left, spin_right, dt, axle=1):
         """The torque (N m) an axle's differential moves from its left wheel to its right one,

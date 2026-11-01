@@ -49,7 +49,8 @@ class Ecu:
         est = self.estimator.step(sensors, dt, self.tire_angle, self._activity())
         yaw_rate = sensors.yaw_rate if sensors is not None else 0.0
         esc = self.esc.step(est.speed, yaw_rate, est.sideslip, self.tire_angle, est.friction, dt)
-        torques = self.powertrain.torques(request, est.speed, dt, est.wheels, esc)
+        torques = self.powertrain.torques(request, est.speed, dt, est.wheels, esc,
+                                          sensors.accel_x if sensors is not None else None)
         self.last = Actuation(torques.drive, torques.brake, self.tire_angle)
         self.debug = {**getattr(self.powertrain, "debug", {}),
                       "esc": (tuple(round(b) for b in esc.brake), esc.motor_factor),

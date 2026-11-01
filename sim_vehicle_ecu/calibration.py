@@ -68,6 +68,23 @@ class Calibration:
     tc_slip_reapply: float = 0.15
     tc_release_rate: float = 20.0  # 1/s, of the motor torque factor
     tc_apply_rate: float = 5.0  # 1/s
+    # Regen slip control (the brake module's blending, as an EV's): the driven wheels' braking
+    # slip cuts the motor's regen, and the friction brakes take what it gives up; regen is also
+    # held within a share of the driven axle's grip once the car has found it. Not a driver aid
+    # the spec can switch off with ABS: the motor's braking is the brake module's to blend.
+    regen_slip_control: bool = True
+    regen_slip_release: float = 0.25  # the driven wheels' braking slip past which regen falls
+    regen_slip_reapply: float = 0.05  # within which it comes back
+    regen_runaway_slip: float = 0.06  # past this braking slip, a driven wheel
+    regen_runaway_decel: float = 29.4  # m/s^2 (3 g) slowing this much faster than the car, its
+    regen_runaway_deficit: float = 0.3  # axle carrying this share less than the brakes put on
+    # it, is past its tyre's peak (running away): released as past the release slip
+    regen_release_rate: float = 20.0  # 1/s, of the regen factor
+    regen_apply_rate: float = 5.0  # 1/s
+    regen_grip_share: float = 0.7  # regen at most this share of the driven axle's grip found
+    regen_mu_recover_rate: float = 0.001  # 1/s: the axle's friction found, back toward unknown
+    # (slowly: a stop's grip holds for the drive; braking the axle harder without a slip
+    # raises it at once)
     # Stability control (sim_vehicle_ecu.esc): one wheel's brake against a yaw rate the
     # tires cannot hold
     esc_enabled: bool = False
@@ -174,6 +191,18 @@ def spec_values(doc):
     values["regen_fade_low"], values["regen_fade_high"] = fade
     for key in ("type", "preload", "power_lock", "coast_lock"):
         values[f"diff_{key}"] = diff.get(key, getattr(base, f"diff_{key}"))
+    # The regen slip control: a spec's powertrain.regen_slip_control, by the field's name
+    # without its regen_ prefix (`enabled` for regen_slip_control); the defaults when none.
+    rsc = p.get("regen_slip_control") or {}
+    for key, field in (("enabled", "regen_slip_control"), ("slip_release", "regen_slip_release"),
+                       ("slip_reapply", "regen_slip_reapply"),
+                       ("runaway_slip", "regen_runaway_slip"),
+                       ("runaway_decel", "regen_runaway_decel"),
+                       ("runaway_deficit", "regen_runaway_deficit"),
+                       ("release_rate", "regen_release_rate"), ("apply_rate", "regen_apply_rate"),
+                       ("grip_share", "regen_grip_share"),
+                       ("mu_recover_rate", "regen_mu_recover_rate")):
+        values[field] = rsc.get(key, getattr(base, field))
     for key, field in (("enabled", "tc_enabled"), ("slip_limit", "tc_slip_limit"),
                        ("slip_reapply", "tc_slip_reapply"), ("release_rate", "tc_release_rate"),
                        ("apply_rate", "tc_apply_rate")):
