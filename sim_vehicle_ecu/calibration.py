@@ -119,6 +119,7 @@ class Calibration:
     est_sideslip_washout: float = 2.0  # s: the sideslip integral's leak toward 0
     est_mu_margin: float = 0.05  # added to the acceleration reached at the limit
     est_mu_floor: float = 0.1
+    est_mu_max: float = 1.2  # the most any road gives a road tire (dry asphalt), issue 038
     est_mu_recover_rate: float = 0.1  # 1/s, toward tire_friction away from the limit
 
     @classmethod

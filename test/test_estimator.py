@@ -150,6 +150,26 @@ class FrictionTest(unittest.TestCase):
         rear = 1 - (c.com[0] - c.com[2] * 2.0 / G) / c.wheel_base
         self.assertAlmostEqual(est.friction, 2.0 / G / rear + c.est_mu_margin, delta=0.01)
 
+    def test_traction_control_takes_no_deceleration_for_grip(self):
+        """A landing's -17 m/s^2 with a driven wheel still spinning (issue 038) is not the
+        drive's grip: the estimate holds."""
+        c = Calibration()
+        e = Estimator(c, REAR)
+        e.friction = 0.9
+        for _ in range(3):
+            est = e.step(sensors(c, (12.0, 12.0, 30.0, 12.0), ax=-17.0), DT, 0.0,
+                         Activity(driving=True, tc_active=True))
+        self.assertAlmostEqual(est.friction, 0.9, delta=1e-9)
+
+    def test_the_estimate_is_bounded_above(self):
+        c = Calibration()
+        e = Estimator(c, REAR)
+        for _ in range(round(1.0 / DT)):
+            est = e.step(sensors(c, 10.0, ax=-2.0 * G), DT, 0.0,
+                         Activity(braking=True, abs_active=True))
+        self.assertLessEqual(est.friction, c.est_mu_max)
+        self.assertAlmostEqual(est.friction, c.est_mu_max, delta=1e-3)
+
     def test_turning_less_than_asked_is_the_limit(self):
         c = Calibration()
         e = Estimator(c, REAR)
