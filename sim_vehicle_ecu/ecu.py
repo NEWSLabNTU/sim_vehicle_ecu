@@ -13,7 +13,7 @@ Each step, in the order a car's would act on one sample:
 The host steps it every physics substep with the request the vehicle interface holds and what
 the car's sensors read, and applies the actuation to the wheels. It reads nothing else.
 """
-from .actuators import BRAKE_FLOOR, steer
+from .actuators import steer
 from .esc import Esc
 from .estimator import Activity, Estimator
 from .powertrain import make
@@ -66,10 +66,10 @@ class Ecu:
         pt = self.powertrain
         motor = getattr(pt, "motor_torque", None)
         if motor is None:  # ideal: no motor of its own, the torques are the request
-            braking = any(b > BRAKE_FLOOR for b in self.last.brake)
+            braking = any(b > self.c.brake_floor for b in self.last.brake)
             driving = any(d != 0.0 for d in self.last.drive)
         else:  # the motor's torque is along the gear's direction: < 0 is regen
-            braking = any(b > BRAKE_FLOOR for b in self.last.brake) or motor < 0
+            braking = any(b > self.c.brake_floor for b in self.last.brake) or motor < 0
             driving = motor > 0
         abs_ = getattr(pt, "abs", None)
         tc = getattr(pt, "tc", None)

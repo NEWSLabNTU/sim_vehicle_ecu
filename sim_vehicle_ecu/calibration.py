@@ -55,6 +55,10 @@ class Calibration:
     brake_distribution: str = "dynamic_axle_load"
     brake_dead_time: float = 0.08  # s, the hydraulics' dead time
     brake_time_constant: float = 0.06  # s, then a first-order pressure lag
+    # A releasing brake below this is released (actuators.BRAKE_FLOOR says why). A road car's
+    # 50 N m is far more than a small car's whole braking: set it per car, in an ego config's
+    # `ecu:` overrides (AutoSDV's 5 kg car A twin brakes with ~0.2 N m a wheel).
+    brake_floor: float = 50.0  # N m
     # ABS: per wheel, on longitudinal slip against the direction of travel
     abs_enabled: bool = True
     abs_slip_release: float = 0.25

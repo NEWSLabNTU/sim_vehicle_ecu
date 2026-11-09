@@ -46,7 +46,7 @@ calibration; the simulator applies the road's own to the body.
 import math
 from typing import NamedTuple
 
-from .actuators import BRAKE_FLOOR, DeadTime, lag, motor_limit
+from .actuators import DeadTime, lag, motor_limit
 from .brake import SlipModulator
 from .calibration import G
 from .signals import GEAR_NEUTRAL, GEAR_PARK, GEAR_REVERSE, IS_FRONT
@@ -321,7 +321,7 @@ class EvPowertrain(Powertrain):
         for i in range(2):
             delayed = self.brake_delay[i].step(friction[i], dt)
             self.pressure[i] = lag(self.pressure[i], delayed, dt, c.brake_time_constant)
-            if self.pressure[i] < BRAKE_FLOOR and delayed < BRAKE_FLOOR:
+            if self.pressure[i] < c.brake_floor and delayed < c.brake_floor:
                 self.pressure[i] = 0.0
         # ABS per wheel on its slip against the direction of travel (regen counts as braking
         # on a driven wheel); off below abs_min_speed, where the slip means little.
