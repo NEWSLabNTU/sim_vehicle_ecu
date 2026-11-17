@@ -16,7 +16,7 @@ and Control*, ch. 8 and 14). This one does it the textbook way:
 - **Slip**: each wheel's road speed against the reference, over `|v| + est_slip_offset`:
   PhysX's own definition (its tire adds its minimum slip denominator, 4 m/s on the rig, to
   the speed), the one the ABS and TC thresholds were tuned against when they read PhysX's
-  slip. A `max(|v|, 4)` read up to twice that at town speeds (scenario-world-bridge issue
+  slip. A `max(|v|, 4)` read up to twice that at town speeds (scensim issue
   009). In a turn each wheel's own road speed differs from the car's: the yaw rate moves the
   outer wheels faster and the inner slower, and a steered front wheel rolls along its own
   heading. So each wheel speed is held against the speed its place on the car gives (the
@@ -32,7 +32,7 @@ and Control*, ch. 8 and 14). This one does it the textbook way:
   away from the limit it recovers toward the design friction at `est_mu_recover_rate` /s, and
   never below what the car is reaching. Under traction control alone only the drive's forward
   push counts (a deceleration then, a landing's or the brakes', holds the estimate), and the
-  estimate stays at or under `est_mu_max` (issue 038 of scenario-world-bridge).
+  estimate stays at or under `est_mu_max` (issue 038 of scensim).
 """
 import math
 from typing import NamedTuple
@@ -167,7 +167,7 @@ class Estimator:
                 # only the driven axle is at its limit: its share of the load carries `reached`.
                 # Drive pushes the car forward (backward in reverse, with the speed): a
                 # deceleration is the brakes', the road's or a landing's, not the drive's grip
-                # (scenario-world-bridge issue 038: -17 m/s^2 landing read as 4.7).
+                # (scensim issue 038: -17 m/s^2 landing read as 4.7).
                 # Not pushed forward at all, the car shows nothing of its grip: hold.
                 drive = sensors.accel_x if v >= 0 else -sensors.accel_x
                 if drive <= 0.0:

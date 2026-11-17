@@ -74,7 +74,7 @@ def drive(c, accel, seconds, mu, peak, v=13.0, ecu=None, sliding=0.7, spin=1.0, 
 
 
 class RegenSlipControlTest(unittest.TestCase):
-    ICE = (0.265, 0.05)  # swb's ice: the peak friction and its slip
+    ICE = (0.265, 0.05)  # scensim's ice: the peak friction and its slip
 
     def test_without_it_regen_locks_the_rear_on_ice(self):
         _, worst, _, _ = drive(drift_car(regen_slip_control=False), -1.8, 2.0, *self.ICE)
