@@ -7,7 +7,7 @@ lacks: the motor's envelope and torque lag, the brake hydraulics, the steering m
 
 Pure Python 3, the standard library only: no simulator and no ROS, so Isaac Sim's Python 3.12
 and the system's both import it. It is part of
-[scensim](https://github.com/NEWSLabNTU/scenario-world-bridge) (roadmap 055);
+[scensim](https://github.com/NEWSLabNTU/scensim) (roadmap 055);
 the Isaac vehicle bridge, [autoware_isaac_bridge](https://github.com/NEWSLabNTU/autoware_isaac_bridge)
 (aib), steps it every physics substep.
 
