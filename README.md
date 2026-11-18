@@ -109,6 +109,11 @@ just test    # unit tests
 just check   # tests and pyflakes
 ```
 
+It is also a ROS package (`ament_python`, `package.xml` at the root), so a colcon workspace
+that holds it builds and installs it like any other: `colcon build --packages-select
+sim_vehicle_ecu` puts the module in the install's `lib/python3.10/site-packages`, with no
+dependency beyond Python. Isaac Sim's Python imports it from the source tree as before.
+
 ## License
 
 Apache-2.0.
