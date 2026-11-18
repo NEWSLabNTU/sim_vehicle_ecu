@@ -47,7 +47,10 @@ loaded [sim_vehicle_spec](https://github.com/NEWSLabNTU/sim_vehicle_spec) spec's
 (version 2); `Calibration.from_spec` reads its `geometry`, `inertia`, `wheels`, `tires`,
 `brakes` (with `abs`, and `esc` when there is one), `powertrain` (with `traction_control` and `differential`),
 `resistance` and `steering`, and the defaults hold for the rest. The defaults are the shipped
-Tesla Model 3 RWD's, so `Calibration()` is that car.
+Tesla Model 3 RWD's on CARLA 0.9.16's body, so `Calibration()` is that car. A spec with
+`bodies` is calibrated as the body its simulator drives, `spec.effective(spec, body).doc`;
+`from_spec` refuses the spec's own document, since the wheel radius and the reduction are the
+body's.
 
 ## What is in it
 

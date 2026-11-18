@@ -140,7 +140,13 @@ class Calibration:
     @classmethod
     def from_spec(cls, doc, overrides=None):
         """The calibration of a vehicle spec's document (sim_vehicle_spec: a loaded
-        `Spec.doc`, validated), then `overrides` by field name."""
+        `Spec.doc`, validated), then `overrides` by field name. A spec with bodies is
+        calibrated as one of them: `spec.effective(spec, body).doc`, the car on the body its
+        simulator drives (its wheel radius and reduction)."""
+        if doc.get("bodies"):
+            raise ValueError(
+                "a spec with bodies: calibrate one of them, Calibration.from_spec("
+                f"spec.effective(spec, body).doc), body one of {', '.join(doc['bodies'])}")
         return cls.from_dict(spec_values(doc), overrides)
 
     def to_dict(self):

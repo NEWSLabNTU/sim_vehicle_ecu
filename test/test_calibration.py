@@ -5,8 +5,8 @@ import unittest
 
 from sim_vehicle_ecu.calibration import Calibration
 
-# The physics sections of sim_vehicle_spec's vehicles/tesla_model3.yaml (spec version 2), as
-# a loaded spec's document holds them.
+# The physics sections of sim_vehicle_spec's vehicles/tesla_model3.yaml (spec version 2) as its
+# carla-0.9.16 body, as spec.effective(spec, "carla-0.9.16").doc holds them.
 MODEL3 = {
     "geometry": {"wheel_base": 3.005, "wheel_tread": 1.667, "wheel_radius": 0.37,
                  "wheel_width": 0.235, "max_steer_angle": 0.7},
@@ -75,6 +75,13 @@ class FromSpecTest(unittest.TestCase):
         c = Calibration.from_spec(doc)
         self.assertEqual((c.rolling_coefficient, c.drag_coefficient, c.frontal_area),
                          (0.0, 0.0, 0.0))
+
+    def test_a_spec_with_bodies_names_one(self):
+        doc = copy.deepcopy(MODEL3)
+        doc["bodies"] = {"carla-0.9.16": {}, "carla-1.0": {}}
+        with self.assertRaises(ValueError) as e:
+            Calibration.from_spec(doc)
+        self.assertIn("carla-1.0", str(e.exception))
 
     def test_overrides_win_and_unknown_ones_are_refused(self):
         c = Calibration.from_spec(MODEL3, {"esc_enabled": True, "com": [1.4, 0.0, 0.5]})
