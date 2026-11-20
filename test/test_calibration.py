@@ -76,6 +76,12 @@ class FromSpecTest(unittest.TestCase):
         self.assertEqual((c.rolling_coefficient, c.drag_coefficient, c.frontal_area),
                          (0.0, 0.0, 0.0))
 
+    def test_the_slip_offset_is_physx_min_active_slip_denominator(self):
+        self.assertEqual(Calibration.from_spec(MODEL3).est_slip_offset, 4.0)
+        doc = copy.deepcopy(MODEL3)
+        doc["isaac"] = {"physx": {"min_active_slip_denominator": 0.5}}
+        self.assertEqual(Calibration.from_spec(doc).est_slip_offset, 0.5)
+
     def test_a_spec_with_bodies_names_one(self):
         doc = copy.deepcopy(MODEL3)
         doc["bodies"] = {"carla-0.9.16": {}, "carla-1.0": {}}
