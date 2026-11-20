@@ -52,11 +52,35 @@ Tesla Model 3 RWD's on CARLA 0.9.16's body, so `Calibration()` is that car. A sp
 `from_spec` refuses the spec's own document, since the wheel radius and the reduction are the
 body's.
 
+## Your own control component
+
+A car may run its owner's model of its control component instead (scensim roadmap 091): a
+RoboRacer's speed controller and servo, say. It is a class in the owner's own package, found by
+its entry point in group `scensim.vehicle_components`, and a spec names it:
+
+```yaml
+powertrain: {model: component, component: my_racer.vesc_servo, params: {erpm_gain: 4614.0}}
+```
+
+```python
+from sim_vehicle_ecu import component
+
+car = component.for_spec(spec_doc, seed=run_seed)   # ideal, ev, or the spec's own component
+act = component.checked(car.step(command, sensors, dt))
+```
+
+The interface (`commands`, `__init__(vehicle, params, seed)`, `reset()`, `step(command, sensors,
+dt)`) and its rules are in `sim_vehicle_ecu/component.py` and in scensim's
+docs/design/roboracer-indoor-twin.md. `ideal` and `ev` are components too (`Ecu` with that
+powertrain), declared in the same group. The component must be pure Python: Isaac Sim's
+interpreter imports it.
+
 ## What is in it
 
 | module | what |
 |---|---|
 | `signals` | `Request`, `Sensors`, `Actuation`; the wheel order and the gears |
+| `component` | the control component interface: the shipped `ideal` and `ev`, a user's own by entry point, the host's checks |
 | `calibration` | `Calibration`, from a spec and overrides |
 | `ecu` | `Ecu`: steering, estimates, ESC, powertrain, in that order every step |
 | `estimator` | reference speed, wheel slip, sideslip, friction, from the sensors |

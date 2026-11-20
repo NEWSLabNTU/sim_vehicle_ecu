@@ -37,3 +37,6 @@ class Actuation(NamedTuple):
     drive: tuple  # N m per wheel, signed along x
     brake: tuple  # N m per wheel, a magnitude (it opposes the wheel's spin)
     tire_angle: float  # the steering actuator's bicycle tire angle, rad
+    # what the real controller reports (a VESC: erpm, duty, current_motor, ...), in its own
+    # units, for the vehicle interface to publish and the run to record; None: nothing
+    telemetry: object = None

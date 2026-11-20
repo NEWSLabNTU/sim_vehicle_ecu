@@ -51,7 +51,7 @@ from .brake import SlipModulator
 from .calibration import G
 from .signals import GEAR_NEUTRAL, GEAR_PARK, GEAR_REVERSE, IS_FRONT
 
-MODELS = ("ideal", "physx", "ev", "fmu")
+MODELS = ("ideal", "physx", "ev", "fmu", "component")
 DRIVE_AXLES = ("rear", "front", "all")
 DIFFERENTIALS = ("open", "locked", "lsd")
 # Below this speed rolling resistance ramps to zero, so a standing car is not pushed about.
@@ -543,6 +543,9 @@ def make(calibration):
         return IdealPowertrain(calibration)
     if name == "ev":
         return EvPowertrain(calibration)
+    if name == "component":
+        raise ValueError("powertrain 'component' is the user's whole control component, not a "
+                         "powertrain of Ecu: step it through sim_vehicle_ecu.component.for_spec")
     if name in MODELS:
         raise NotImplementedError(
             f"powertrain {name!r} is reserved and not implemented yet; 'ideal' and 'ev' are")

@@ -9,7 +9,8 @@ standard library only: no simulator, no ROS.
     ecu = Ecu(Calibration.from_spec(spec.doc))
     act = ecu.step(Request(acceleration=1.0, velocity=10.0), Sensors(wheel_speeds=...), 1 / 60)
 
-Modules: `signals` (Request, Sensors, Actuation), `calibration`, `ecu`, `estimator`,
+Modules: `signals` (Request, Sensors, Actuation), `component` (the control component a host
+steps: these, or a user's own by entry point), `calibration`, `ecu`, `estimator`,
 `powertrain`, `esc`, `brake`, `actuators`.
 """
 from .calibration import Calibration

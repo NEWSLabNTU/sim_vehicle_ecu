@@ -180,7 +180,7 @@ def spec_values(doc):
         com=(i["com_front_fraction"] * g["wheel_base"], i.get("com_lateral", 0.0), i["com_height"]),
         wheel_mass=w["mass"], wheel_damping_rate=w.get("damping_rate", base.wheel_damping_rate),
         tire_friction=t["friction"],
-        powertrain=p["model"], max_drive_torque=p["max_drive_torque"],
+        powertrain=p["model"], max_drive_torque=p.get("max_drive_torque", base.max_drive_torque),
         max_brake_torque=b["max_brake_torque"],
         hold_brake_torque=b.get("hold_brake_torque", base.hold_brake_torque),
         brake_distribution=b.get("distribution", base.brake_distribution),
