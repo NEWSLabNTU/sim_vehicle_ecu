@@ -214,3 +214,19 @@ def test_the_truth_feed_delays_adds_noise_and_gives_only_the_declared():
         comp.TruthFeed(("speed",), {"pose": {"latency_s": 0.1}})
     with pytest.raises(comp.ComponentError, match="unknown"):
         comp.TruthFeed(("speed",), {"speed": {"delay": 0.1}})
+
+
+def test_the_command_types_of_the_other_interfaces():
+    """091 W18: `ackermann` and `vesc` components get these, defined before any command."""
+    import math
+
+    from sim_vehicle_ecu import component, signals
+
+    assert set(component.COMMAND_TYPES) == set(component.COMMANDS)
+    for name in component.COMMAND_TYPES.values():
+        assert hasattr(signals, name)
+    a = signals.AckermannCommand()
+    assert a.speed == 0.0 and a.age == math.inf
+    v = signals.VescCommand()
+    assert v.motor is None and v.servo is None and v.age == math.inf
+    assert signals.VescCommand("speed", 4614.0, 0.53, 0.01).motor in signals.MOTOR_MODES

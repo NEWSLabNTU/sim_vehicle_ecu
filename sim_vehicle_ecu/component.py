@@ -18,9 +18,10 @@ The interface (docs/design/roboracer-indoor-twin.md in scensim, section 2):
 
 - `vehicle`: the spec's document as the simulator's body sees it (sim_vehicle_spec, v2);
   `params`: the spec's `powertrain.params` (or a run's override), as is; `seed`: the run's.
-- `step` gets the last command (None before the first), the car's own sensor readings after
-  the last step (`signals.Sensors`, None on the first step after a reset) and the step's
-  length in s, and returns `signals.Actuation` in SI units, wheels FL, FR, RL, RR. It sees no
+- `step` gets the last command (`COMMAND_TYPES`: for `autoware` None before the first; for
+  `ackermann` and `vesc` always one, its `age` infinite before the first), the car's own sensor
+  readings after the last step (`signals.Sensors`, None on the first step after a reset) and
+  the step's length in s, and returns `signals.Actuation` in SI units, wheels FL, FR, RL, RR. It sees no
   ground truth, does no I/O, and is deterministic given its seed.
 - `reset` comes before an episode's first step, after a teleport and after a respawn.
 - Ground truth: none by default. A component may declare inputs from `TRUTH_INPUTS` it needs
@@ -41,9 +42,10 @@ from .calibration import Calibration
 from .ecu import Ecu
 
 GROUP = "scensim.vehicle_components"
-# What a component may take (signals: Request for `autoware`; the others come with their
-# vehicle interfaces, scensim roadmap 091 step 5).
+# What a component may take, and the command its `step` gets for each (signals): the vehicle
+# interface's profile gives one (scensim roadmap 091).
 COMMANDS = ("autoware", "ackermann", "vesc")
+COMMAND_TYPES = {"autoware": "Request", "ackermann": "AckermannCommand", "vesc": "VescCommand"}
 # The shipped components a spec names by `powertrain.model` alone.
 SHIPPED = ("ideal", "ev")
 # The ground truth a component may declare (scensim roadmap 091: only what the user also measured
@@ -283,6 +285,6 @@ def budget(physics_hz):
     return 0.06 / float(physics_hz)
 
 
-__all__ = ["COMMANDS", "ComponentError", "EcuComponent", "Ev", "GROUP", "Ideal", "SHIPPED",
+__all__ = ["COMMAND_TYPES", "COMMANDS", "ComponentError", "EcuComponent", "Ev", "GROUP", "Ideal", "SHIPPED",
            "TRUTH_INPUTS", "TRUTH_SETTINGS", "TruthFeed", "budget", "check", "checked",
            "for_spec", "load", "resolve", "timing"]
