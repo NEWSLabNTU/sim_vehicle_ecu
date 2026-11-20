@@ -179,7 +179,10 @@ def spec_values(doc):
         mass=i["mass"],
         com=(i["com_front_fraction"] * g["wheel_base"], i.get("com_lateral", 0.0), i["com_height"]),
         wheel_mass=w["mass"], wheel_damping_rate=w.get("damping_rate", base.wheel_damping_rate),
-        tire_friction=t["friction"],
+        # one value per car, the prior ESC and the friction estimate read: the lower axle's
+        # when the axles have their own tyres (tires.front, tires.rear; scensim 091 W24)
+        tire_friction=min((t.get(a) or {}).get("friction", t["friction"])
+                          for a in ("front", "rear")),
         powertrain=p["model"], max_drive_torque=p.get("max_drive_torque", base.max_drive_torque),
         max_brake_torque=b["max_brake_torque"],
         hold_brake_torque=b.get("hold_brake_torque", base.hold_brake_torque),

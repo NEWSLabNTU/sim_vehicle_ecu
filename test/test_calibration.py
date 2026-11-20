@@ -82,6 +82,16 @@ class FromSpecTest(unittest.TestCase):
         doc["isaac"] = {"physx": {"min_active_slip_denominator": 0.5}}
         self.assertEqual(Calibration.from_spec(doc).est_slip_offset, 0.5)
 
+    def test_the_tire_friction_is_the_lower_axles(self):
+        doc = copy.deepcopy(MODEL3)
+        doc["tires"]["rear"] = {"friction": 0.8, "lat_stiff_value": 30.0}
+        self.assertEqual(Calibration.from_spec(doc).tire_friction, 0.8)
+        doc["tires"]["front"] = {"friction": 1.2}
+        doc["tires"]["rear"] = {"friction": 1.1}
+        self.assertEqual(Calibration.from_spec(doc).tire_friction, 1.1)
+        doc["tires"]["front"] = {"lat_stiff_value": 10.0}
+        self.assertEqual(Calibration.from_spec(doc).tire_friction, 1.0)
+
     def test_a_spec_with_bodies_names_one(self):
         doc = copy.deepcopy(MODEL3)
         doc["bodies"] = {"carla-0.9.16": {}, "carla-1.0": {}}
