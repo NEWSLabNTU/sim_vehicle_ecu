@@ -29,6 +29,9 @@ class Sensors(NamedTuple):
     yaw_rate: float = 0.0  # rad/s, + turning left
     accel_x: float = 0.0  # m/s^2
     accel_y: float = 0.0  # m/s^2, + to the left
+    # the ground truth a control component declared (sim_vehicle_ecu.component.TRUTH_INPUTS),
+    # as the host delivers it (latency, noise); None for every other component
+    truth: object = None
 
 
 class Actuation(NamedTuple):

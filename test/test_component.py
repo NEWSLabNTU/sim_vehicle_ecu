@@ -172,3 +172,45 @@ def test_the_cost_budget_and_its_timing():
     assert comp.budget(60) == pytest.approx(1e-3)
     mean, worst = comp.timing(comp.for_spec(MODEL3), Request(1.0, 5.0), None, DT, calls=50)
     assert 0 < mean <= worst
+
+
+def test_ground_truth_is_only_what_a_component_declares():
+    """The user, 2026-11-20 (scensim 091): a component gets the car's own sensors by default, and
+    ground truth only as declared from TRUTH_INPUTS (what the user also measured on the car)."""
+    class Declares:
+        commands = "autoware"
+        truth = ("speed", "pose")
+
+        def reset(self):
+            pass
+
+        def step(self, command, sensors, dt):
+            return None
+
+    assert comp.check(Declares()).truth == ("speed", "pose")
+    Declares.truth = ("speed", "telepathy")
+    with pytest.raises(comp.ComponentError, match="truth = .*telepathy"):
+        comp.check(Declares())
+    Declares.truth = "speed"
+    with pytest.raises(comp.ComponentError, match="a tuple of"):
+        comp.check(Declares())
+    assert Sensors().truth is None
+
+
+def test_the_truth_feed_delays_adds_noise_and_gives_only_the_declared():
+    values = lambda k: {"speed": float(k), "pose": (float(k), 0.0, 0.0), "yaw": 9.0}
+    feed = comp.TruthFeed(("speed", "pose"), {"speed": {"latency_s": 0.05}})
+    got = [feed(k * 0.01, values(k)) for k in range(10)]
+    assert set(got[0]) == {"speed", "pose"}                    # only the declared
+    assert [g["speed"] for g in got] == [0, 0, 0, 0, 0, 0, 1, 2, 3, 4]  # 0.05 s late
+    assert [g["pose"][0] for g in got] == list(range(10))     # no latency set: as is
+    noisy = comp.TruthFeed(("speed",), {"speed": {"noise_std": 0.1}}, seed=3)
+    a = [noisy(k * 0.01, values(k))["speed"] for k in range(5)]
+    noisy.reset()
+    assert a == [noisy(k * 0.01, values(k))["speed"] for k in range(5)]  # seeded
+    assert a != [float(k) for k in range(5)]
+    assert comp.TruthFeed((), {})(0.0, values(0)) is None
+    with pytest.raises(comp.ComponentError, match="does not declare"):
+        comp.TruthFeed(("speed",), {"pose": {"latency_s": 0.1}})
+    with pytest.raises(comp.ComponentError, match="unknown"):
+        comp.TruthFeed(("speed",), {"speed": {"delay": 0.1}})

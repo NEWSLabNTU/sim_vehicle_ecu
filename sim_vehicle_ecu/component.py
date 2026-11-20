@@ -23,6 +23,10 @@ The interface (docs/design/roboracer-indoor-twin.md in scensim, section 2):
   length in s, and returns `signals.Actuation` in SI units, wheels FL, FR, RL, RR. It sees no
   ground truth, does no I/O, and is deterministic given its seed.
 - `reset` comes before an episode's first step, after a teleport and after a respawn.
+- Ground truth: none by default. A component may declare inputs from `TRUTH_INPUTS` it needs
+  (`truth = ("speed", ...)`), only quantities its user also measured on the real car (motion
+  capture, say); it gets them in `sensors.truth`, a mapping of the declared names only, through
+  a `TruthFeed` (each with its own latency and noise, set per run).
 
 Components are found by name: the entry points of group `GROUP` in the importing interpreter
 (a user's package declares its own), and the shipped ones, `ideal` and `ev` (`Ecu` with that
@@ -30,6 +34,7 @@ powertrain), which a spec names as `powertrain.model` without an entry point. Pu
 standard library only.
 """
 import math
+import random
 from importlib import metadata
 
 from .calibration import Calibration
@@ -41,6 +46,18 @@ GROUP = "scensim.vehicle_components"
 COMMANDS = ("autoware", "ackermann", "vesc")
 # The shipped components a spec names by `powertrain.model` alone.
 SHIPPED = ("ideal", "ev")
+# The ground truth a component may declare (scensim roadmap 091: only what the user also measured
+# on the real car), with its unit and shape.
+TRUTH_INPUTS = {
+    "pose": "m, m, rad: x, y, yaw in the map frame",
+    "yaw": "rad: heading in the map frame",
+    "velocity": "m/s, m/s: the body's velocity, x and y in the body frame",
+    "speed": "m/s: forward speed over the ground",
+    "yaw_rate": "rad/s: the body's, true",
+    "wheel_slip": "1 x 4: each wheel's longitudinal slip (FL, FR, RL, RR)",
+    "sideslip": "rad: the body's sideslip angle",
+}
+TRUTH_SETTINGS = ("latency_s", "noise_std")
 
 
 class ComponentError(RuntimeError):
@@ -135,6 +152,11 @@ def check(component, name="component"):
     for m in ("reset", "step"):
         if not callable(getattr(component, m, None)):
             raise ComponentError(f"{name}: no {m}()")
+    truth = getattr(component, "truth", ())
+    unknown = [t for t in (truth if isinstance(truth, (tuple, list)) else [truth])
+               if t not in TRUTH_INPUTS]
+    if not isinstance(truth, (tuple, list)) or unknown:
+        raise ComponentError(f"{name}: truth = {truth!r}: a tuple of {', '.join(TRUTH_INPUTS)}")
     driven = getattr(component, "driven", (True,) * 4)
     if not (isinstance(driven, tuple) and len(driven) == 4):
         raise ComponentError(f"{name}: driven must be four booleans (FL, FR, RL, RR)")
@@ -165,6 +187,60 @@ def for_spec(vehicle, overrides=None, seed=0, component=None):
     if pt.get("model") == "component":
         return load(pt["component"], vehicle, pt.get("params"), seed)
     return load(pt.get("model") or "ideal", vehicle, overrides, seed)
+
+
+class TruthFeed:
+    """The declared ground truth as a component gets it: each input the truth `latency_s` ago
+    (the newest sample at or before then; the first before that), plus Gaussian noise of
+    `noise_std` from the run's seed, per element. `settings`: {input: {latency_s, noise_std}},
+    only for declared inputs. Pure; deterministic for a seed."""
+
+    def __init__(self, names, settings=None, seed=0):
+        self.names = tuple(names)
+        settings = dict(settings or {})
+        extra = sorted(set(settings) - set(self.names))
+        if extra:
+            raise ComponentError(f"truth settings for {extra}, which the component does not "
+                                 f"declare (it declares {list(self.names) or 'none'})")
+        self.settings = {}
+        for n in self.names:
+            s = dict(settings.get(n) or {})
+            bad = sorted(set(s) - set(TRUTH_SETTINGS))
+            if bad:
+                raise ComponentError(f"truth.{n}: unknown {bad}; "
+                                     f"known: {', '.join(TRUTH_SETTINGS)}")
+            lat, std = float(s.get("latency_s", 0.0)), float(s.get("noise_std", 0.0))
+            if lat < 0 or std < 0:
+                raise ComponentError(f"truth.{n}: latency_s and noise_std are >= 0")
+            self.settings[n] = (lat, std)
+        self.seed = seed
+        self.reset()
+
+    def reset(self):
+        self.random = random.Random(self.seed)
+        self.history = []  # (t, {name: value})
+
+    def __call__(self, t, values):
+        """The declared inputs at time `t` (s), given `values` ({name: value} of this step's
+        truth, at least the declared names); None when nothing is declared."""
+        if not self.names:
+            return None
+        self.history.append((t, {n: values[n] for n in self.names}))
+        horizon = t - max(lat for lat, _ in self.settings.values())
+        while len(self.history) > 1 and self.history[1][0] <= horizon + 1e-12:
+            self.history.pop(0)
+        out = {}
+        for n in self.names:
+            lat, std = self.settings[n]
+            v = self.history[0][1][n]
+            for ts, vals in self.history:
+                if ts <= t - lat + 1e-12:
+                    v = vals[n]
+            if std > 0:
+                v = (tuple(x + self.random.gauss(0.0, std) for x in v) if isinstance(v, tuple)
+                     else v + self.random.gauss(0.0, std))
+            out[n] = v
+        return out
 
 
 def checked(act, name="component"):
@@ -208,4 +284,5 @@ def budget(physics_hz):
 
 
 __all__ = ["COMMANDS", "ComponentError", "EcuComponent", "Ev", "GROUP", "Ideal", "SHIPPED",
-           "budget", "check", "checked", "for_spec", "load", "resolve", "timing"]
+           "TRUTH_INPUTS", "TRUTH_SETTINGS", "TruthFeed", "budget", "check", "checked",
+           "for_spec", "load", "resolve", "timing"]

@@ -71,7 +71,10 @@ act = component.checked(car.step(command, sensors, dt))
 
 The interface (`commands`, `__init__(vehicle, params, seed)`, `reset()`, `step(command, sensors,
 dt)`) and its rules are in `sim_vehicle_ecu/component.py` and in scensim's
-docs/design/roboracer-indoor-twin.md. `ideal` and `ev` are components too (`Ecu` with that
+docs/design/roboracer-indoor-twin.md. It sees the car's own sensors; ground truth only as it
+declares it (`truth = ("speed", ...)`, from `TRUTH_INPUTS`: what its user also measured on the
+real car), in `sensors.truth`, through a `TruthFeed` with each input's latency and noise.
+`ideal` and `ev` are components too (`Ecu` with that
 powertrain), declared in the same group. The component must be pure Python: Isaac Sim's
 interpreter imports it.
 
