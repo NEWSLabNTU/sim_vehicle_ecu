@@ -179,9 +179,17 @@ A component with a batched form declares `batch = <class>` (built as `cls(vehicl
 seeds)`), and `batch.ScalarOf` gives its scalar form from it, so the two are one code. Every
 other component, `ideal`, `ev` and `fmu` included, runs as `LoopBatch`: N instances, each stepped
 by `step`. That is correct, but it is one Python step per slot, and `vectorised = False`, so
-`require_vectorised` refuses it by name. The batched form equals N scalar steps bit for bit when
-it computes with `+ - * /`, sqrt, min/max/clip, where and comparisons; numpy's transcendental
-kernels can differ from `math` in the last bit. numpy is imported by `batch` only.
+`require_vectorised` refuses it by name. numpy is imported by `batch` only.
+
+For a component author, the batched form equals N scalar steps bit for bit only when both forms
+compute elementwise with `+ - * /`, sqrt, min/max/clip, where and comparisons:
+
+- **Transcendentals.** numpy's exp, log, tanh and arctan2 can differ from `math` in the last
+  bit.
+- **Sums and means over the wheels.** Write them out in one order in both forms:
+  `((w[0] + w[1]) + w[2]) + w[3]`. Never use `np.sum` or `np.mean`, which add pairwise, and
+  never use `sum()`. Python 3.12's built-in `sum()` of floats is compensated, unlike 3.10's,
+  so the same scalar code gives other last bits in Isaac's Python than in the system's.
 
 ## Develop
 
