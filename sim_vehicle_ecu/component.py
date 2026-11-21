@@ -31,8 +31,9 @@ The interface (docs/design/roboracer-indoor-twin.md in scensim, section 2):
 
 Components are found by name: the entry points of group `GROUP` in the importing interpreter
 (a user's package declares its own), and the shipped ones, `ideal` and `ev` (`Ecu` with that
-powertrain), which a spec names as `powertrain.model` without an entry point. Pure: the
-standard library only.
+powertrain), which a spec names as `powertrain.model` without an entry point; and `fmu`
+(sim_vehicle_ecu.fmu: an FMI 2.0 co-simulation unit, named as a component: `component: fmu`).
+Pure: the standard library only.
 """
 import math
 import random
@@ -47,7 +48,7 @@ GROUP = "scensim.vehicle_components"
 COMMANDS = ("autoware", "ackermann", "vesc")
 COMMAND_TYPES = {"autoware": "Request", "ackermann": "AckermannCommand", "vesc": "VescCommand"}
 # The shipped components a spec names by `powertrain.model` alone.
-SHIPPED = ("ideal", "ev")
+SHIPPED = ("ideal", "ev", "fmu")
 # The ground truth a component may declare (scensim roadmap 091: only what the user also measured
 # on the real car), with its unit and shape.
 TRUTH_INPUTS = {
@@ -137,6 +138,9 @@ def resolve(name):
         return Ideal
     if name == "ev":
         return Ev
+    if name == "fmu":
+        from .fmu import Fmu  # an FMI 2.0 unit (roadmap 091 W4)
+        return Fmu
     ep = _entry_point(name)
     try:
         return ep.load()
@@ -165,11 +169,16 @@ def check(component, name="component"):
     return component
 
 
-def load(name, vehicle, params=None, seed=0):
-    """The component `name` for the car `vehicle` (a spec document), ready to step."""
+def load(name, vehicle, params=None, seed=0, base=None):
+    """The component `name` for the car `vehicle` (a spec document), ready to step. `base`: the
+    spec's directory, for a component that names files relative to it (`takes_base = True`: the
+    shipped `fmu`)."""
     cls = resolve(name)
     try:
-        component = cls(vehicle, dict(params or {}), int(seed))
+        if getattr(cls, "takes_base", False):
+            component = cls(vehicle, dict(params or {}), int(seed), base=base)
+        else:
+            component = cls(vehicle, dict(params or {}), int(seed))
     except ComponentError:
         raise
     except Exception as e:  # noqa: BLE001
@@ -178,17 +187,18 @@ def load(name, vehicle, params=None, seed=0):
     return check(component, name)
 
 
-def for_spec(vehicle, overrides=None, seed=0, component=None):
+def for_spec(vehicle, overrides=None, seed=0, component=None, base=None):
     """The component a spec's car runs: its `powertrain.model` (`ideal`, `ev`: the shipped
     onboard computers, `overrides` their calibration overrides), or for `component` the entry
     point `powertrain.component` with `powertrain.params`. `component`: a run's
-    `{entry_point, params}` in place of the spec's."""
+    `{entry_point, params}` in place of the spec's. `base`: the spec's directory (relative files
+    in a component's params, as `fmu`'s unit)."""
     pt = vehicle.get("powertrain") or {}
     if component:
-        return load(component["entry_point"], vehicle, component.get("params"), seed)
+        return load(component["entry_point"], vehicle, component.get("params"), seed, base)
     if pt.get("model") == "component":
-        return load(pt["component"], vehicle, pt.get("params"), seed)
-    return load(pt.get("model") or "ideal", vehicle, overrides, seed)
+        return load(pt["component"], vehicle, pt.get("params"), seed, base)
+    return load(pt.get("model") or "ideal", vehicle, overrides, seed, base)
 
 
 class TruthFeed:

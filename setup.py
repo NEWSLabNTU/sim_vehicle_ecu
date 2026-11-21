@@ -12,7 +12,8 @@ setup(
     # the shipped control components (scensim roadmap 091); a spec names them by
     # powertrain.model, a user's own by its entry point in the same group
     entry_points={"scensim.vehicle_components": [
-        "ideal = sim_vehicle_ecu.component:Ideal", "ev = sim_vehicle_ecu.component:Ev"]},
+        "ideal = sim_vehicle_ecu.component:Ideal", "ev = sim_vehicle_ecu.component:Ev",
+        "fmu = sim_vehicle_ecu.fmu:Fmu"]},
     install_requires=["setuptools"],
     tests_require=["pytest"],
 )

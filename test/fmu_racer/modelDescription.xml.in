@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fmiModelDescription fmiVersion="2.0" modelName="racer" guid="{8c4e810f-3df3-4a00-8276-176fa3c9f000}"
+    generationTool="sim_vehicle_ecu test" variableNamingConvention="flat" numberOfEventIndicators="0">
+  <CoSimulation modelIdentifier="racer" canHandleVariableCommunicationStepSize="@VARIABLE@"
+      canBeInstantiatedOnlyOncePerProcess="@ONCE@" canNotUseMemoryManagementFunctions="true"/>
+  <DefaultExperiment startTime="0" stepSize="0.004"/>
+  <ModelVariables>
+    <ScalarVariable name="speed_ref" valueReference="0" causality="input" variability="continuous"><Real start="0"/></ScalarVariable>
+    <ScalarVariable name="servo" valueReference="1" causality="input" variability="continuous"><Real start="0.53"/></ScalarVariable>
+    <ScalarVariable name="wheel_rl" valueReference="2" causality="input" variability="continuous"><Real start="0"/></ScalarVariable>
+    <ScalarVariable name="wheel_rr" valueReference="3" causality="input" variability="continuous"><Real start="0"/></ScalarVariable>
+    <ScalarVariable name="torque_rl" valueReference="4" causality="output" variability="continuous"><Real/></ScalarVariable>
+    <ScalarVariable name="torque_rr" valueReference="5" causality="output" variability="continuous"><Real/></ScalarVariable>
+    <ScalarVariable name="steer" valueReference="6" causality="output" variability="continuous"><Real/></ScalarVariable>
+    <ScalarVariable name="erpm" valueReference="7" causality="output" variability="continuous"><Real/></ScalarVariable>
+    <ScalarVariable name="kp" valueReference="8" causality="parameter" variability="fixed"><Real start="0.5"/></ScalarVariable>
+    <ScalarVariable name="ki" valueReference="9" causality="parameter" variability="fixed"><Real start="0.1"/></ScalarVariable>
+    <ScalarVariable name="wheel_radius" valueReference="10" causality="parameter" variability="fixed"><Real start="0.05"/></ScalarVariable>
+    <ScalarVariable name="gear" valueReference="11" causality="parameter" variability="fixed"><Real start="20"/></ScalarVariable>
+    <ScalarVariable name="noise_std" valueReference="12" causality="parameter" variability="fixed"><Real start="0"/></ScalarVariable>
+    <ScalarVariable name="steer_gain" valueReference="13" causality="parameter" variability="fixed"><Real start="-1.2"/></ScalarVariable>
+    <ScalarVariable name="steer_offset" valueReference="14" causality="parameter" variability="fixed"><Real start="0.53"/></ScalarVariable>
+    <ScalarVariable name="brake" valueReference="15" causality="output" variability="continuous"><Real/></ScalarVariable>
+    <ScalarVariable name="steps" valueReference="0" causality="output" variability="discrete"><Integer/></ScalarVariable>
+    <ScalarVariable name="seed" valueReference="1" causality="parameter" variability="fixed"><Integer start="0"/></ScalarVariable>
+    <ScalarVariable name="brake_on" valueReference="0" causality="input" variability="discrete"><Boolean start="false"/></ScalarVariable>
+  </ModelVariables>
+  <ModelStructure>
+    <Outputs><Unknown index="5"/><Unknown index="6"/><Unknown index="7"/><Unknown index="8"/><Unknown index="16"/><Unknown index="17"/></Outputs>
+  </ModelStructure>
+</fmiModelDescription>

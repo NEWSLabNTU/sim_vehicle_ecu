@@ -78,12 +78,41 @@ real car), in `sensors.truth`, through a `TruthFeed` with each input's latency a
 powertrain), declared in the same group. The component must be pure Python: Isaac Sim's
 interpreter imports it.
 
+## A compiled model: the `fmu` component
+
+A model that is not Python (C, C++, Simulink, Modelica, a vendor's binary) is exported as an FMI
+2.0 co-simulation unit, and the shipped `fmu` component steps it. Its params name the unit,
+relative to the spec's directory (the host passes it as `base`), and map the unit's variables to
+the command, the sensors and the actuation:
+
+```yaml
+powertrain:
+  model: component
+  component: fmu
+  params:
+    fmu: models/racer.fmu
+    commands: vesc
+    inputs: {speed_ref: command.value, servo: command.servo, wheel_rl: "sensors.wheel_speeds[2]"}
+    outputs: {"drive[2]": torque_rl, tire_angle: steer, telemetry.erpm: erpm}
+    parameters: {kp: 0.8}
+    seed: seed
+```
+
+The sources, targets and rules are in `sim_vehicle_ecu/fmu.py`. Every name is checked against the
+unit's modelDescription.xml when the component is made. A unit that cannot take a variable step
+size refuses a changed dt. It needs nothing beyond the standard library (ctypes): a Linux x86_64
+binary (`binaries/linux64/`), unpacked once per sha256 under `SCENSIM_FMU_CACHE` (default
+`~/.cache/scensim/fmu`). Each car is its own instance of the unit, so one process can step
+many, unless the unit says `canBeInstantiatedOnlyOncePerProcess`. A unit's log messages are kept
+as their format strings: a ctypes callback cannot read C varargs.
+
 ## What is in it
 
 | module | what |
 |---|---|
 | `signals` | `Request`, `Sensors`, `Actuation`; the wheel order and the gears |
-| `component` | the control component interface: the shipped `ideal` and `ev`, a user's own by entry point, the host's checks |
+| `component` | the control component interface: the shipped `ideal`, `ev` and `fmu`, a user's own by entry point, the host's checks |
+| `fmu` | the `fmu` component: an FMI 2.0 co-simulation unit, stepped through ctypes |
 | `calibration` | `Calibration`, from a spec and overrides |
 | `ecu` | `Ecu`: steering, estimates, ESC, powertrain, in that order every step |
 | `estimator` | reference speed, wheel slip, sideslip, friction, from the sensors |
@@ -146,4 +175,5 @@ dependency beyond Python. Isaac Sim's Python imports it from the source tree as 
 
 ## License
 
-Apache-2.0.
+Apache-2.0. The FMI 2.0 headers in `test/fmi2/`, used only to build the test unit, are the
+Modelica Association's, under the 2-Clause BSD License (`test/fmi2/LICENSE.txt`).
