@@ -197,9 +197,11 @@ def unpack(fmu_path):
         try:
             os.rename(tmp, out)
             tmp = None
-        except OSError:
+        except OSError as e:
             if not (out / ".unpacked").exists():
-                raise
+                raise ComponentError(f"fmu: cannot unpack {fmu_path} into {out}: {e}; a directory "
+                                     "there without its .unpacked marker is an interrupted "
+                                     "unpack: remove it") from None
     finally:
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)
