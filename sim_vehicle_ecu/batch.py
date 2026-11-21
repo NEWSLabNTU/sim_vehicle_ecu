@@ -279,20 +279,63 @@ def _mask(mask, n):
     return m
 
 
+def slot_params(params, n, name="component"):
+    """`params` as load_batch takes it, made one of: `(shared dict, None)` or `(None, list of N
+    dicts)`. A list of N dicts is per slot; anything else is one dict for every slot."""
+    if isinstance(params, (list, tuple)):
+        if len(params) != n:
+            raise BatchError(f"{name}: {len(params)} params dicts for {n} slots")
+        return None, [dict(p or {}) for p in params]
+    return dict(params or {}), None
+
+
+def per_key(per_slot, name="component"):
+    """N dicts as one dict of per-key values: a number becomes an array [N] (float64); a value
+    that is not a number must be equal in every slot, and is kept as is."""
+    keys = set(per_slot[0])
+    odd = [i for i, p in enumerate(per_slot) if set(p) != keys]
+    if odd:
+        raise BatchError(f"{name}: slot {odd[0]}'s params have other keys "
+                         f"({sorted(set(per_slot[odd[0]]) ^ keys)}) than slot 0's")
+    out = {}
+    for k in sorted(keys):
+        vals = [p[k] for p in per_slot]
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals):
+            out[k] = np.array(vals, dtype=DTYPE)
+        elif all(v == vals[0] for v in vals):
+            out[k] = vals[0]
+        else:
+            raise BatchError(f"{name}: param {k!r} differs across slots and is not a number "
+                             "(only numbers vary per slot)")
+    return out
+
+
 def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
     """N slots of the component `name`, one per seed: its `batch` class when it has one
     (vectorised), else a LoopBatch of N instances (`fmu`: N instances of the one unit, its
-    canBeInstantiatedOnlyOncePerProcess refused as for two cars)."""
+    canBeInstantiatedOnlyOncePerProcess refused as for two cars).
+
+    `params`: one dict for every slot, or a list of N dicts, slot i's (per-slot calibration: a
+    sample varying the car, a fit's candidates). A LoopBatch builds instance i from dict i. A
+    batch class gets them as one dict of per-key arrays [N] (numbers only; `per_key`), and only
+    when it declares `per_slot_params = True`; otherwise it is refused by name."""
     seeds = [int(s) for s in seeds]
     if not seeds:
         raise BatchError(f"{name}: a batch of no slots")
+    shared, per_slot = slot_params(params, len(seeds), getattr(name, "__name__", name))
     given = isinstance(name, type)   # a class (a test's, a host's own) rather than a name
     cls = name if given else comp.resolve(name)
     name = cls.__name__ if given else name
     bcls = getattr(cls, "batch", None)
     if bcls is not None:
+        if per_slot is not None:
+            if not getattr(bcls, "per_slot_params", False):
+                raise BatchError(f"{name}: per-slot params, but its batch class does not take "
+                                 "them (per_slot_params); fix: declare it and read params as "
+                                 "arrays [N], or give one dict")
+            shared = per_key(per_slot, name)
         try:
-            b = bcls(vehicle, dict(params or {}), seeds)
+            b = bcls(vehicle, shared, seeds)
         except comp.ComponentError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -301,10 +344,11 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
         b.n = len(seeds)
         b.vectorised = getattr(b, "vectorised", True)
         return check_batch(b, name)
+    each = per_slot if per_slot is not None else [shared] * len(seeds)
     if given:
-        return LoopBatch([comp.check(cls(vehicle, dict(params or {}), s), name) for s in seeds],
-                         name)
-    return LoopBatch([comp.load(name, vehicle, params, s, base) for s in seeds], name)
+        return LoopBatch([comp.check(cls(vehicle, dict(p), s), name)
+                          for p, s in zip(each, seeds)], name)
+    return LoopBatch([comp.load(name, vehicle, p, s, base) for p, s in zip(each, seeds)], name)
 
 
 def check_batch(b, name="component"):
@@ -324,4 +368,4 @@ def check_batch(b, name="component"):
 __all__ = ["ACTUATION_FIELDS", "BatchError", "COMMAND_FIELDS", "LoopBatch", "SENSOR_FIELDS",
            "ScalarOf", "actuations_to_batch", "batch_to_actuations", "batch_to_commands",
            "batch_to_sensors", "checked_batch", "commands_to_batch", "load_batch",
-           "require_vectorised", "sensors_to_batch"]
+           "per_key", "require_vectorised", "sensors_to_batch", "slot_params"]

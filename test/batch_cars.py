@@ -18,14 +18,17 @@ DT = 1 / 120
 # roboracer example's component takes its place (092 S3, with 118's W23).
 class LagBatch:
     commands = "vesc"
+    per_slot_params = True   # kt, servo_tau, servo_gain, noise: a number or an array [N]
     truth = ("speed",)
     driven = (False, False, True, True)
 
     def __init__(self, vehicle, params, seeds):
-        self.kt = float(params.get("kt", 0.05))        # N m per A at the wheel
-        self.tau = float(params.get("servo_tau", 0.05))
-        self.gain = float(params.get("servo_gain", 0.6))  # rad per unit servo from centre
-        self.noise = float(params.get("noise", 0.002))
+        n = len(seeds)
+        arr = lambda k, d: np.broadcast_to(np.asarray(params.get(k, d), float), (n,)).copy()  # noqa
+        self.kt = arr("kt", 0.05)          # N m per A at the wheel
+        self.tau = arr("servo_tau", 0.05)
+        self.gain = arr("servo_gain", 0.6)  # rad per unit servo from centre
+        self.noise = arr("noise", 0.002)
         self.seeds = list(seeds)
         n = len(self.seeds)
         self.angle = np.zeros(n)
@@ -41,9 +44,10 @@ class LagBatch:
         n = len(self.angle)
         servo = np.where(np.isnan(c["servo"]), 0.5, c["servo"])
         target = (servo - 0.5) * 2.0 * self.gain
-        a = min(dt / self.tau, 1.0)
-        jitter = (np.array([r.gauss(0.0, self.noise) for r in self.rngs]) if self.noise
-                  else 0.0)
+        a = np.minimum(dt / self.tau, 1.0)
+        # a slot with no noise draws nothing, as its single car does
+        jitter = np.array([r.gauss(0.0, sd) if sd else 0.0
+                           for r, sd in zip(self.rngs, self.noise.tolist())])
         self.angle = self.angle + (target - self.angle) * a + jitter
         current = np.where(c["motor"] == signals.MOTOR_MODES.index("current"), c["value"], 0.0)
         brake_a = np.where(c["motor"] == signals.MOTOR_MODES.index("brake"), c["value"], 0.0)

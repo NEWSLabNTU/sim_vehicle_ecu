@@ -151,3 +151,48 @@ def test_the_checks_name_the_field_and_slot():
         B.load_batch(Wrapper, {}, {}, [1])
     with pytest.raises(B.BatchError, match=r"a mask of shape \(3,\), not \(2,\)"):
         B.load_batch(LagScalar, {}, {}, [1, 2]).reset_batch(np.ones(3, bool))
+
+
+def test_per_slot_params_equal_single_cars_each_with_its_own():
+    """A list of N dicts: slot i is the single car built with dict i (a sample varying the car,
+    a fit's candidate parameter sets), bit for bit."""
+    import random as _r
+    rng = _r.Random(9)
+    n = 24
+    per = [{"kt": rng.uniform(0.02, 0.08), "servo_tau": rng.uniform(0.02, 0.2),
+            "servo_gain": rng.uniform(0.3, 0.9), "noise": rng.choice([0.0, 0.01])}
+           for _ in range(n)]
+    seeds = list(range(100, 100 + n))
+    b = B.load_batch(Lag, {}, per, seeds)
+    assert b.vectorised
+    run_both(b, [LagScalar({}, p, s) for p, s in zip(per, seeds)], steps=300)
+    loop = B.load_batch(LagScalar, {}, per, seeds)          # a LoopBatch: instance i, dict i
+    run_both(loop, [LagScalar({}, p, s) for p, s in zip(per, seeds)], steps=100)
+
+
+def test_per_slot_params_are_refused_where_they_cannot_go():
+    with pytest.raises(B.BatchError, match="2 params dicts for 3 slots"):
+        B.load_batch(Lag, {}, [{}, {}], [1, 2, 3])
+
+    class Shared:
+        commands, truth = "vesc", ()
+
+        def __init__(self, *a):
+            pass
+
+        def reset_batch(self, m):
+            pass
+
+        def step_batch(self, *a):
+            pass
+
+    class Wrap:
+        batch = Shared
+
+    with pytest.raises(B.BatchError, match="does not take them"):
+        B.load_batch(Wrap, {}, [{"k": 1.0}, {"k": 2.0}], [1, 2])
+    with pytest.raises(B.BatchError, match="other keys"):
+        B.load_batch(Lag, {}, [{"kt": 1.0}, {"noise": 0.0}], [1, 2])
+    with pytest.raises(B.BatchError, match="'mode' differs across slots and is not a number"):
+        B.per_key([{"mode": "a"}, {"mode": "b"}])
+    assert B.per_key([{"mode": "a", "k": 1}, {"mode": "a", "k": 2}])["k"].tolist() == [1.0, 2.0]

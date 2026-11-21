@@ -175,6 +175,11 @@ b.reset_batch(np.ones(3, bool))
 act = b.step_batch(commands, sensors, dt)   # dicts of arrays, slot first
 ```
 
+`params` is one dict for every slot, or a list of N dicts, one per slot (a sample varying the
+car, or a fit's candidate parameter sets). A LoopBatch builds instance i from dict i. A batch
+class gets per-slot params as one dict of per-key arrays [N], and only when it declares
+`per_slot_params = True`. Only numbers vary per slot.
+
 A component with a batched form declares `batch = <class>` (built as `cls(vehicle, params,
 seeds)`), and `batch.ScalarOf` gives its scalar form from it, so the two are one code. Every
 other component, `ideal`, `ev` and `fmu` included, runs as `LoopBatch`: N instances, each stepped
