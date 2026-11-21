@@ -92,6 +92,37 @@ def test_conversions_keep_none_and_types():
     assert back == sens
 
 
+def test_a_reading_without_a_declared_truth_is_marked_not_zeroed_silently():
+    sens = [Sensors((1.0,) * 4, 0.0, 0.0, 0.0, {"speed": 2.0}), Sensors((1.0,) * 4, 0.0, 0.0, 0.0, {})]
+    arr = B.sensors_to_batch(sens, ("speed",))
+    assert list(arr["truth_valid"]["speed"]) == [True, False]
+    assert B.batch_to_sensors(arr, ("speed",)) == sens
+
+
+def test_reductions_are_written_out_in_both_forms():
+    """Three orders of one sum of four that differ in the last bit (2.6): numpy's pairwise
+    ((a + b) + (c + d)), the left-to-right loop, and Python 3.12's sum(), which is compensated
+    (Neumaier) and so differs from both. Only the written-out order is the same everywhere."""
+    import sys
+    rng = np.random.default_rng(0)
+    w = rng.normal(0, 1e3, (20000, 4)) + rng.normal(0, 1e-3, (20000, 4))
+    pairwise = (w[:, 0] + w[:, 1]) + (w[:, 2] + w[:, 3])
+    ordered = ((w[:, 0] + w[:, 1]) + w[:, 2]) + w[:, 3]
+    loop = np.array([((r[0] + r[1]) + r[2]) + r[3] for r in w.tolist()])
+    builtin = np.array([sum(r) for r in w.tolist()])
+    assert np.array_equal(ordered, loop)
+    assert not np.array_equal(pairwise, loop)
+    if sys.version_info >= (3, 12):
+        assert not np.array_equal(builtin, loop)
+
+
+def test_telemetry_on_some_slots_only_is_named():
+    a = signals.Actuation((0.0,) * 4, (0.0,) * 4, 0.0, {"erpm": 1.0})
+    b = signals.Actuation((0.0,) * 4, (0.0,) * 4, 0.0, None)
+    with pytest.raises(B.BatchError, match="slots 1, 2 report none, the others do"):
+        B.actuations_to_batch([a, b, b])
+
+
 def test_the_checks_name_the_field_and_slot():
     good = {"drive": np.zeros((2, 4)), "brake": np.zeros((2, 4)), "tire_angle": np.zeros(2)}
     assert B.checked_batch(good, 2) is good

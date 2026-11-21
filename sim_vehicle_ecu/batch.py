@@ -13,7 +13,8 @@ The arrays are the scalar NamedTuples' fields, struct of arrays, slot first:
   (False where the scalar form gets None: `autoware` before its first command).
 - sensors: {wheel_speeds [N, 4], yaw_rate, accel_x, accel_y [N], valid [N] (False where the
   scalar form gets None: the first step after a reset), truth {name: [N] or [N, k]}, declared
-  names only}.
+  names only, and truth_valid {name: [N]}: False where that slot's reading lacks the name (the
+  scalar form's truth dict without it), its values then zeros that are not a reading}.
 - actuation: {drive [N, 4], brake [N, 4], tire_angle [N], telemetry {key: [N]} (optional)}.
 - `dt` is one float: one world step for every slot. Slot i's seed is `seeds[i]`, the seed a
   single component for that car would get.
@@ -25,9 +26,12 @@ refuses it by name for an executor that needs throughput. A component with one d
 form from it, so the two cannot drift.
 
 Bit for bit: a batched form equals N scalar steps exactly only when both compute with + - * /,
-sqrt, min/max/clip, where and comparisons. numpy's exp, log, tanh and atan2 may use their own
-vector kernels, which can differ from Python's `math` in the last bit; a batched form that
-needs one should say so.
+sqrt, min/max/clip, where and comparisons, elementwise. Two things break it in the last bit:
+numpy's exp, log, tanh and atan2 (its own vector kernels, not Python's `math`), and reductions:
+np.sum and np.mean add pairwise, ((a + b) + (c + d)), a scalar loop adds ((a + b) + c) + d, and
+Python 3.12's built-in sum() of floats is compensated (Neumaier), unlike 3.10's, so it differs
+from both. A reduction (a sum, a mean, a dot over the four wheels) is written out in one order
+in both forms, not np.sum and not sum(). A batched form that needs either says so.
 
 numpy is imported here only: the scalar package stays the standard library.
 """
@@ -111,15 +115,18 @@ def sensors_to_batch(sensors, truth_names=()):
     # every declared input has its array, valid slots or not (a slot without a reading: zeros)
     truth = {name: np.zeros((n, TRUTH_WIDTH[name]) if TRUTH_WIDTH[name] else n, DTYPE)
              for name in truth_names}
+    have = {name: np.zeros(n, bool) for name in truth_names}
     for i, s in enumerate(sensors):
         if s is None:
             continue
         out["wheel_speeds"][i] = s.wheel_speeds
         out["yaw_rate"][i], out["accel_x"][i], out["accel_y"][i] = s.yaw_rate, s.accel_x, s.accel_y
         for name in truth_names:
-            truth[name][i] = (s.truth or {})[name]
+            if name in (s.truth or {}):   # a reading not available yet: absent, as for the scalar
+                truth[name][i] = s.truth[name]
+                have[name][i] = True
     if truth_names:
-        out["truth"] = truth
+        out["truth"], out["truth_valid"] = truth, have
     return out
 
 
@@ -132,7 +139,10 @@ def batch_to_sensors(arrays, truth_names=()):
         truth = None
         if truth_names:
             truth = {}
+            have = arrays.get("truth_valid") or {}
             for name in truth_names:
+                if name in have and not have[name][i]:
+                    continue
                 v = arrays["truth"][name][i]
                 truth[name] = tuple(float(x) for x in v) if np.ndim(v) else float(v)
         out.append(signals.Sensors(tuple(float(x) for x in arrays["wheel_speeds"][i]),
@@ -147,10 +157,15 @@ def actuations_to_batch(acts):
            "tire_angle": np.array([a.tire_angle for a in acts], DTYPE)}
     tel = [a.telemetry for a in acts]
     if any(t is not None for t in tel):
-        keys = [tuple(sorted(t)) if t is not None else None for t in tel]
+        none = [i for i, t in enumerate(tel) if t is None]
+        if none:
+            raise BatchError(f"telemetry: slots {', '.join(map(str, none))} report none, the "
+                             "others do (a component reports it in every slot or none)")
+        keys = [tuple(sorted(t)) for t in tel]
         if len(set(keys)) != 1:
-            raise BatchError("telemetry: the slots report different keys "
-                             f"({sorted({k for k in keys if k}, key=str)})")
+            odd = [i for i, k in enumerate(keys) if k != keys[0]]
+            raise BatchError(f"telemetry: slots {', '.join(map(str, odd))} report keys "
+                             f"{sorted(set(keys[odd[0]]))}, slot 0 {sorted(set(keys[0]))}")
         out["telemetry"] = {k: np.array([t[k] for t in tel]) for k in keys[0]}
     return out
 

@@ -50,14 +50,17 @@ class LagBatch:
         stale = c["age"] > 0.5
         torque = np.where(stale, 0.0, np.clip(current * self.kt, -2.0, 2.0))
         # the sensors' speed slows the motor: back-EMF, only once there is a reading
-        speed = np.where(s["valid"], s["truth"]["speed"], 0.0)
+        has = s["valid"] & s["truth_valid"]["speed"]   # a reading, and its speed in it
+        speed = np.where(has, s["truth"]["speed"], 0.0)
+        w = s["wheel_speeds"]   # the mean of four, added in the scalar order, not np.mean
+        mean = np.where(s["valid"], (((w[:, 0] + w[:, 1]) + w[:, 2]) + w[:, 3]) / 4.0, 0.0)
         torque = torque - np.where(torque > 0, 0.01 * speed, 0.0)
         drive = np.zeros((n, 4))
         drive[:, 2] = drive[:, 3] = 0.5 * torque
         brake = np.zeros((n, 4))
         brake[:, 2] = brake[:, 3] = np.where(stale, 1.0, np.abs(brake_a) * self.kt)
         return {"drive": drive, "brake": brake, "tire_angle": self.angle,
-                "telemetry": {"current_motor": current, "stale": stale}}
+                "telemetry": {"current_motor": current, "stale": stale, "wheel_mean": mean}}
 
 
 class Lag(B.ScalarOf):
@@ -86,11 +89,14 @@ class LagScalar:
         brake_a = c.value if c.motor == "brake" else 0.0
         stale = c.age > 0.5
         torque = 0.0 if stale else min(max(current * self.kt, -2.0), 2.0)
-        speed = s.truth["speed"] if s is not None else 0.0
+        speed = s.truth["speed"] if s is not None and "speed" in s.truth else 0.0
+        w = s.wheel_speeds if s is not None else None   # written out: sum() is compensated
+        mean = (((w[0] + w[1]) + w[2]) + w[3]) / 4.0 if s is not None else 0.0   # on 3.12
         torque = torque - (0.01 * speed if torque > 0 else 0.0)
         b = 1.0 if stale else abs(brake_a) * self.kt
         return signals.Actuation((0.0, 0.0, 0.5 * torque, 0.5 * torque), (0.0, 0.0, b, b),
-                                 self.angle, {"current_motor": current, "stale": stale})
+                                 self.angle, {"current_motor": current, "stale": stale,
+                                              "wheel_mean": mean})
 
 
 def vesc_run(n, steps, seed=7):
@@ -109,7 +115,7 @@ def vesc_run(n, steps, seed=7):
             sens.append(None if k == 0 or rng.random() < 0.05 else
                         Sensors(tuple(float(x) for x in rng.normal(10, 1, 4)),
                                 float(rng.normal()), float(rng.normal()), float(rng.normal()),
-                                {"speed": float(rng.normal(3, 1))}))
+                                {"speed": float(rng.normal(3, 1))} if rng.random() > 0.1 else {}))
         resets = rng.random(n) < 0.03
         out.append((cmds, sens, resets))
     return out
