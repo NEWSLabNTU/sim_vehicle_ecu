@@ -179,3 +179,23 @@ dependency beyond Python. Isaac Sim's Python imports it from the source tree as 
 
 Apache-2.0. The FMI 2.0 headers in `test/fmi2/`, used only to build the test unit, are the
 Modelica Association's, under the 2-Clause BSD License (`test/fmi2/LICENSE.txt`).
+
+## The batched form
+
+`sim_vehicle_ecu.batch` steps N cars (slots) at once on arrays, for a batched executor (scensim
+roadmap 092 S3; the contract is scensim's docs/design/roboracer-indoor-twin.md, section 2.6):
+
+```python
+from sim_vehicle_ecu import batch
+b = batch.load_batch("ev", vehicle, params, seeds=[1, 2, 3])
+b.reset_batch(np.ones(3, bool))
+act = b.step_batch(commands, sensors, dt)   # dicts of arrays, slot first
+```
+
+A component with a batched form declares `batch = <class>` (built as `cls(vehicle, params,
+seeds)`), and `batch.ScalarOf` gives its scalar form from it, so the two are one code. Every
+other component, `ideal`, `ev` and `fmu` included, runs as `LoopBatch`: N instances, each stepped
+by `step`. That is correct, but it is one Python step per slot, and `vectorised = False`, so
+`require_vectorised` refuses it by name. The batched form equals N scalar steps bit for bit when
+it computes with `+ - * /`, sqrt, min/max/clip, where and comparisons; numpy's transcendental
+kernels can differ from `math` in the last bit. numpy is imported by `batch` only.
