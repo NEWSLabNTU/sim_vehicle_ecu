@@ -290,8 +290,9 @@ def slot_params(params, n, name="component"):
 
 
 def per_key(per_slot, name="component"):
-    """N dicts as one dict of per-key values: a number becomes an array [N] (float64); a value
-    that is not a number must be equal in every slot, and is kept as is."""
+    """N dicts as one dict of per-key values [N]: bools become a bool array, ints (every slot's
+    an int) an int64 array, other numbers a float64 array. Any other value must be equal in
+    every slot and is kept as is (a list, a string, a file name)."""
     keys = set(per_slot[0])
     odd = [i for i, p in enumerate(per_slot) if set(p) != keys]
     if odd:
@@ -300,14 +301,25 @@ def per_key(per_slot, name="component"):
     out = {}
     for k in sorted(keys):
         vals = [p[k] for p in per_slot]
-        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals):
+        if all(isinstance(v, bool) for v in vals):
+            out[k] = np.array(vals, dtype=bool)
+        elif all(isinstance(v, int) and not isinstance(v, bool) for v in vals):
+            out[k] = np.array(vals, dtype=np.int64)
+        elif all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals):
             out[k] = np.array(vals, dtype=DTYPE)
-        elif all(v == vals[0] for v in vals):
+        elif _all_equal(vals):
             out[k] = vals[0]
         else:
             raise BatchError(f"{name}: param {k!r} differs across slots and is not a number "
                              "(only numbers vary per slot)")
     return out
+
+
+def _all_equal(vals):
+    try:
+        return all(bool(v == vals[0]) for v in vals)
+    except (TypeError, ValueError):   # an array value (ambiguous truth), an odd __eq__
+        return False
 
 
 def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
@@ -317,8 +329,9 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
 
     `params`: one dict for every slot, or a list of N dicts, slot i's (per-slot calibration: a
     sample varying the car, a fit's candidates). A LoopBatch builds instance i from dict i. A
-    batch class gets them as one dict of per-key arrays [N] (numbers only; `per_key`), and only
-    when it declares `per_slot_params = True`; otherwise it is refused by name."""
+    batch class that declares `per_slot_params = True` always gets one dict of per-key arrays
+    [N] (`per_key`; a shared dict as N equal slots), so it has one code path; one that does
+    not gets the shared dict, and per-slot params are refused for it by name."""
     seeds = [int(s) for s in seeds]
     if not seeds:
         raise BatchError(f"{name}: a batch of no slots")
@@ -328,12 +341,12 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
     name = cls.__name__ if given else name
     bcls = getattr(cls, "batch", None)
     if bcls is not None:
-        if per_slot is not None:
-            if not getattr(bcls, "per_slot_params", False):
-                raise BatchError(f"{name}: per-slot params, but its batch class does not take "
-                                 "them (per_slot_params); fix: declare it and read params as "
-                                 "arrays [N], or give one dict")
-            shared = per_key(per_slot, name)
+        if getattr(bcls, "per_slot_params", False):
+            shared = per_key(per_slot if per_slot is not None else [shared] * len(seeds), name)
+        elif per_slot is not None:
+            raise BatchError(f"{name}: per-slot params, but its batch class does not take "
+                             "them (per_slot_params); fix: declare it and read params as "
+                             "arrays [N], or give one dict")
         try:
             b = bcls(vehicle, shared, seeds)
         except comp.ComponentError:

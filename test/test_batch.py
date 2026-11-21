@@ -195,4 +195,14 @@ def test_per_slot_params_are_refused_where_they_cannot_go():
         B.load_batch(Lag, {}, [{"kt": 1.0}, {"noise": 0.0}], [1, 2])
     with pytest.raises(B.BatchError, match="'mode' differs across slots and is not a number"):
         B.per_key([{"mode": "a"}, {"mode": "b"}])
-    assert B.per_key([{"mode": "a", "k": 1}, {"mode": "a", "k": 2}])["k"].tolist() == [1.0, 2.0]
+    pk = B.per_key([{"mode": "a", "k": 1, "x": 1.5, "on": True},
+                    {"mode": "a", "k": 2, "x": 2, "on": False}])
+    assert pk["k"].dtype == np.int64 and pk["x"].dtype == np.float64 and pk["on"].dtype == bool
+    assert pk["mode"] == "a" and pk["on"].tolist() == [True, False]
+    with pytest.raises(B.BatchError, match="'a' differs"):   # an array value: refused cleanly
+        B.per_key([{"a": np.zeros(2)}, {"a": np.zeros(2)}])
+
+
+def test_a_per_slot_class_sees_arrays_from_a_shared_dict_too():
+    b = B.load_batch(Lag, {}, {"kt": 0.07}, [1, 2, 3])
+    assert b.kt.tolist() == [0.07] * 3
