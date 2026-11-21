@@ -163,23 +163,6 @@ before, bit for bit. `regen_slip_control: false` turns it off; a spec may set th
 `runaway_decel`, `runaway_deficit`, `slip_growth`, `spin_settle`, `release_rate`,
 `apply_rate`, `grip_share`, `mu_recover_rate`).
 
-## Develop
-
-```bash
-just test    # unit tests
-just check   # tests and pyflakes
-```
-
-It is also a ROS package (`ament_python`, `package.xml` at the root), so a colcon workspace
-that holds it builds and installs it like any other: `colcon build --packages-select
-sim_vehicle_ecu` puts the module in the install's `lib/python3.10/site-packages`, with no
-dependency beyond Python. Isaac Sim's Python imports it from the source tree as before.
-
-## License
-
-Apache-2.0. The FMI 2.0 headers in `test/fmi2/`, used only to build the test unit, are the
-Modelica Association's, under the 2-Clause BSD License (`test/fmi2/LICENSE.txt`).
-
 ## The batched form
 
 `sim_vehicle_ecu.batch` steps N cars (slots) at once on arrays, for a batched executor (scensim
@@ -199,3 +182,20 @@ by `step`. That is correct, but it is one Python step per slot, and `vectorised 
 `require_vectorised` refuses it by name. The batched form equals N scalar steps bit for bit when
 it computes with `+ - * /`, sqrt, min/max/clip, where and comparisons; numpy's transcendental
 kernels can differ from `math` in the last bit. numpy is imported by `batch` only.
+
+## Develop
+
+```bash
+just test    # unit tests
+just check   # tests and pyflakes
+```
+
+It is also a ROS package (`ament_python`, `package.xml` at the root), so a colcon workspace
+that holds it builds and installs it like any other: `colcon build --packages-select
+sim_vehicle_ecu` puts the module in the install's `lib/python3.10/site-packages`, with no
+dependency beyond Python. Isaac Sim's Python imports it from the source tree as before.
+
+## License
+
+Apache-2.0. The FMI 2.0 headers in `test/fmi2/`, used only to build the test unit, are the
+Modelica Association's, under the 2-Clause BSD License (`test/fmi2/LICENSE.txt`).
