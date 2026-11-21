@@ -103,7 +103,9 @@ unit's modelDescription.xml when the component is made. A unit that cannot take 
 size refuses a changed dt. It needs nothing beyond the standard library (ctypes): a Linux x86_64
 binary (`binaries/linux64/`), unpacked once per sha256 under `SCENSIM_FMU_CACHE` (default
 `~/.cache/scensim/fmu`). Each car is its own instance of the unit, so one process can step
-many, unless the unit says `canBeInstantiatedOnlyOncePerProcess`. A unit's log messages are kept
+many, unless the unit says `canBeInstantiatedOnlyOncePerProcess`. **A `.fmu` is native code**: its
+binary runs inside the world server's process with your rights, as any component's code does, so
+take a unit only from a source you would take a program from. A unit's log messages are kept
 as their format strings: a ctypes callback cannot read C varargs.
 
 ## What is in it

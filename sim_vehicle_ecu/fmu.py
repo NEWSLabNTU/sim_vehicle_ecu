@@ -31,7 +31,8 @@ index in MOTOR_MODES, -1 before the first), `sensors.wheel_speeds[i]`, `sensors.
 `sensors.accel_x`, `sensors.accel_y`, `sensors.truth.<name>` or `[i]` (declared names only),
 `dt`, `time`. A source with no value yet (no sensors before the first step after a reset, a
 servo not yet commanded) holds the input's last value, at first its start value. Targets:
-`drive[i]`, `brake[i]`, `tire_angle`, `telemetry.<key>`; one not mapped is 0 (no telemetry: None).
+`drive[i]`, `brake[i]`, `tire_angle` (floats), `telemetry.<key>` (the variable's type: float, int
+or bool); one not mapped is 0 (no telemetry: None).
 
 Every name is checked against the unit's modelDescription.xml when the component is made: a
 variable it lacks, or one of the wrong causality (inputs from `input`, outputs from `output`,
@@ -43,7 +44,8 @@ once per content (its sha256, `fmu_sha256`) under SCENSIM_FMU_CACHE (default
 step size raises if dt changes. reset() is fmi2Reset, then the parameters, the seed and the
 initialisation again.
 
-Pure: the standard library (ctypes, xml.etree, zipfile). No state outside the instance but the
+A unit is native code: it runs in the host's process (the world server's), with its user's
+rights, like any component. Pure otherwise: the standard library (ctypes, xml.etree, zipfile). No state outside the instance but the
 loaded libraries (one per unit, shared) and their instance counts, so one process can step many
 cars (and a batched host later, roadmap 092 S3), except a unit that says
 canBeInstantiatedOnlyOncePerProcess: its second instance is refused.
@@ -160,7 +162,15 @@ def cache_dir():
 
 
 def unpack(fmu_path):
-    """The unit at `fmu_path` unpacked (once per content) and its sha256: (directory, sha256)."""
+    """The unit at `fmu_path` unpacked (once per content) and its sha256: (directory, sha256).
+
+    Into a temporary directory beside the cache's, renamed into place when complete: two
+    processes making one unit at once (two seats, a world server and a testbench check) never
+    write a binary another may already have loaded. The one whose rename loses uses the
+    winner's."""
+    import shutil
+    import tempfile
+
     fmu_path = Path(fmu_path)
     try:
         data = fmu_path.read_bytes()
@@ -168,19 +178,31 @@ def unpack(fmu_path):
         raise ComponentError(f"fmu: cannot read {fmu_path}: {e}") from None
     sha = hashlib.sha256(data).hexdigest()
     out = cache_dir() / sha
-    if not (out / ".unpacked").exists():
+    if (out / ".unpacked").exists():
+        return out, sha
+    cache_dir().mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=f".{sha[:12]}-", dir=cache_dir()))
+    try:
         try:
             with zipfile.ZipFile(fmu_path) as z:
+                root = str(tmp.resolve())
                 for name in z.namelist():
-                    target = (out / name).resolve()
-                    if not str(target).startswith(str(out.resolve()) + os.sep) and \
-                            target != out.resolve():
+                    target = str((tmp / name).resolve())
+                    if target != root and not target.startswith(root + os.sep):
                         raise ComponentError(f"fmu: {fmu_path} holds a path outside itself: {name}")
-                out.mkdir(parents=True, exist_ok=True)
-                z.extractall(out)
+                z.extractall(tmp)
         except zipfile.BadZipFile:
             raise ComponentError(f"fmu: {fmu_path} is not an FMU (not a zip archive)") from None
-        (out / ".unpacked").write_text(str(fmu_path) + "\n")
+        (tmp / ".unpacked").write_text(str(fmu_path) + "\n")
+        try:
+            os.rename(tmp, out)
+            tmp = None
+        except OSError:
+            if not (out / ".unpacked").exists():
+                raise
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
     return out, sha
 
 
@@ -342,7 +364,7 @@ class Fmu:
                                  "instance of it already runs in this process")
         self._c = self._lib.fmi2Instantiate(
             md.identifier.encode(), 1, (md.guid or "").encode(), self._resources.encode(),
-            ctypes.byref(self._callbacks), 0, 0)
+            ctypes.byref(self._callbacks), 0, 1)  # logging on: many units log nothing otherwise
         if not self._c:
             raise ComponentError(f"fmu: {path}: fmi2Instantiate failed{self._log_tail()}")
         _INSTANCES[self._so] = _INSTANCES.get(self._so, 0) + 1
@@ -378,6 +400,8 @@ class Fmu:
                         f"fmi2SetInteger({var.name})")
 
     def _get(self, var):
+        """The variable's value: a float for Real, an int for Integer and Enumeration, a bool
+        for Boolean (actuation targets take it as a float; telemetry keeps the type)."""
         vr = (ctypes.c_uint * 1)(var.vr)
         if var.type == "Real":
             out = (ctypes.c_double * 1)()
@@ -385,10 +409,11 @@ class Fmu:
         elif var.type == "Boolean":
             out = (ctypes.c_int * 1)()
             self._check(self._lib.fmi2GetBoolean(self._c, vr, 1, out), f"fmi2GetBoolean({var.name})")
-            return float(bool(out[0]))
+            return bool(out[0])
         else:
             out = (ctypes.c_int * 1)()
             self._check(self._lib.fmi2GetInteger(self._c, vr, 1, out), f"fmi2GetInteger({var.name})")
+            return int(out[0])
         return float(out[0])
 
     def _initialize(self):
@@ -467,11 +492,11 @@ class Fmu:
         for (kind, where), var in self.outputs:
             v = self._get(var)
             if kind == "drive":
-                drive[where] = v
+                drive[where] = float(v)
             elif kind == "brake":
-                brake[where] = v
+                brake[where] = float(v)
             elif kind == "tire_angle":
-                angle = v
+                angle = float(v)
             else:
                 telemetry[where] = v
         return signals.Actuation(tuple(drive), tuple(brake), angle,

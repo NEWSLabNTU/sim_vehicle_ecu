@@ -72,7 +72,8 @@ def test_the_mapping_drives_the_wheels_and_the_tire(unit):
     assert a.drive == (0.0, 0.0, pytest.approx(0.6003), pytest.approx(0.6003))
     assert a.brake == (0.0,) * 4
     assert a.tire_angle == pytest.approx((0.6 - 0.53) * -1.2)
-    assert a.telemetry == {"erpm": pytest.approx(200.0), "steps": 1.0}
+    assert a.telemetry == {"erpm": pytest.approx(200.0), "steps": 1}
+    assert isinstance(a.telemetry["steps"], int) and isinstance(a.drive[2], float)
 
 
 def test_reset_starts_again_and_the_seed_draws_the_noise(unit):
@@ -83,7 +84,7 @@ def test_reset_starts_again_and_the_seed_draws_the_noise(unit):
     assert run != [other.step(VESC, STILL, 0.004).drive for _ in range(20)]
     a.reset()
     assert [a.step(VESC, STILL, 0.004).drive for _ in range(20)] == run  # the integrator too
-    assert a.step(VESC, STILL, 0.004).telemetry["steps"] == 21.0
+    assert a.step(VESC, STILL, 0.004).telemetry["steps"] == 21
 
 
 def test_no_sensors_yet_and_no_servo_yet_hold_the_last_value(unit):
@@ -208,3 +209,26 @@ def test_a_model_exchange_unit_or_another_fmi_version_is_refused():
                                 'modelIdentifier="m"/></fmiModelDescription>')
     with pytest.raises(ComponentError, match="FMI 2.0 units only"):
         fmumod.ModelDescription('<fmiModelDescription fmiVersion="3.0"/>')
+
+
+def test_two_unpacks_of_one_unit_share_the_first_directory(unit, monkeypatch):
+    """243: two processes making one unit at once must never write a binary the other may have
+    loaded: each extracts aside and renames; the one whose rename loses uses the winner's."""
+    first, sha = fmumod.unpack(unit)
+    so = first / "binaries" / "linux64" / "racer.so"
+    stamp = so.stat().st_mtime_ns
+    again, _ = fmumod.unpack(unit)
+    assert again == first and so.stat().st_mtime_ns == stamp   # found, not rewritten
+    # the race: another process's rename won after this one found no marker
+    import shutil
+    shutil.rmtree(first)
+    real = fmumod.os.rename
+
+    def lose(src, dst):
+        real(src, str(src) + ".winner")                # stands in for the other's directory
+        real(str(src) + ".winner", dst)
+        raise OSError(39, "Directory not empty")
+    monkeypatch.setattr(fmumod.os, "rename", lose)
+    won, _ = fmumod.unpack(unit)
+    assert won == first and (won / ".unpacked").exists()
+    assert not [d for d in fmumod.cache_dir().iterdir() if d.name.startswith(".")]  # temp gone
