@@ -33,6 +33,14 @@ Python 3.12's built-in sum() of floats is compensated (Neumaier), unlike 3.10's,
 from both. A reduction (a sum, a mean, a dot over the four wheels) is written out in one order
 in both forms, not np.sum and not sum(). A batched form that needs either says so.
 
+Array namespaces (`array_api`; scensim 092 K2.2c): a batch class declares the namespaces it
+computes in, "numpy" (the reference) or a tuple with "torch", written once over
+sim_vehicle_ecu.xp. `load_batch(..., array_api="torch", device="cuda")` builds it on torch on
+that device: its commands and sensors come in, and its actuation goes out, as tensors there,
+so a batch on a GPU never leaves it; `checked_batch` checks tensors on their device with one
+value brought to the host. Elementwise IEEE arithmetic one op at a time makes the torch batch
+equal the numpy one bit for bit, on the CPU and on a GPU (roboracer_vesc's test_torch.py).
+
 numpy is imported here only: the scalar package stays the standard library.
 """
 import math
@@ -184,10 +192,14 @@ def batch_to_actuations(arrays):
 # --- checks ---------------------------------------------------------------------------------
 
 def checked_batch(act, n, name="component"):
-    """The actuation arrays, or BatchError naming the field: shape, finiteness, brake >= 0."""
+    """The actuation arrays, or BatchError naming the field: shape, finiteness, brake >= 0.
+    Torch tensors (a batch on array_api "torch") are checked on their device, with one value
+    brought to the host for the whole check."""
     if not isinstance(act, dict):
         raise BatchError(f"{name}: step_batch() returned {type(act).__name__}, not a dict of "
                          f"arrays ({', '.join(ACTUATION_FIELDS)})")
+    if _is_torch(act.get("drive")):
+        return _checked_torch(act, n, name)
     want = {"drive": (n, 4), "brake": (n, 4), "tire_angle": (n,)}
     for f, shape in want.items():
         a = act.get(f)
@@ -203,6 +215,30 @@ def checked_batch(act, n, name="component"):
     for k, v in (act.get("telemetry") or {}).items():
         if np.shape(v)[:1] != (n,):
             raise BatchError(f"{name}: telemetry {k}: {np.shape(v)[:1]} slots, not {n}")
+    return act
+
+
+def _is_torch(a):
+    t = type(a)
+    return t.__module__.startswith("torch") and t.__name__ == "Tensor"
+
+
+def _checked_torch(act, n, name):
+    import torch
+    want = {"drive": (n, 4), "brake": (n, 4), "tire_angle": (n,)}
+    for f, shape in want.items():
+        a = act.get(f)
+        if not _is_torch(a) or tuple(a.shape) != shape:
+            raise BatchError(f"{name}: actuation {f}: shape "
+                             f"{tuple(getattr(a, 'shape', ())) or type(a).__name__}, not {shape}")
+    ok = (torch.isfinite(act["drive"]).all() & torch.isfinite(act["brake"]).all()
+          & torch.isfinite(act["tire_angle"]).all() & (act["brake"] >= 0).all())
+    if not bool(ok):     # the one sync; on a failure, name it as the numpy check does
+        host = {f: act[f].detach().cpu().numpy() for f in want}
+        checked_batch(dict(act, **host), n, name)
+    for k, v in (act.get("telemetry") or {}).items():
+        if tuple(v.shape)[:1] != (n,):
+            raise BatchError(f"{name}: telemetry {k}: {tuple(v.shape)[:1]} slots, not {n}")
     return act
 
 
@@ -322,10 +358,16 @@ def _all_equal(vals):
         return False
 
 
-def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
+def load_batch(name, vehicle, params=None, seeds=(0,), base=None, array_api="numpy",
+               device=None):
     """N slots of the component `name`, one per seed: its `batch` class when it has one
     (vectorised), else a LoopBatch of N instances (`fmu`: N instances of the one unit, its
     canBeInstantiatedOnlyOncePerProcess refused as for two cars).
+
+    `array_api` ("numpy", "torch") and `device`: the namespace its arrays are in
+    (sim_vehicle_ecu.xp; K2.2c). Another than numpy needs a batch class that declares it in its
+    `array_api`, built as `cls(vehicle, params, seeds, xp=<namespace>)`; its commands and
+    sensors come in, and its actuation goes out, as that namespace's arrays on that device.
 
     `params`: one dict for every slot, or a list of N dicts, slot i's (per-slot calibration: a
     sample varying the car, a fit's candidates). A LoopBatch builds instance i from dict i. A
@@ -340,6 +382,13 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
     cls = name if given else comp.resolve(name)
     name = cls.__name__ if given else name
     bcls = getattr(cls, "batch", None)
+    if array_api != "numpy":
+        from . import xp as xpmod
+        if bcls is None or not xpmod.supports(bcls, array_api):
+            raise BatchError(f"{name}: no batched form on array_api {array_api!r} (its "
+                             f"`array_api` is {getattr(bcls, 'array_api', 'numpy')!r}); fix: "
+                             "write its batch class over sim_vehicle_ecu.xp and declare it, or "
+                             "run it on numpy")
     if bcls is not None:
         if getattr(bcls, "per_slot_params", False):
             shared = per_key(per_slot if per_slot is not None else [shared] * len(seeds), name)
@@ -348,7 +397,10 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
                              "them (per_slot_params); fix: declare it and read params as "
                              "arrays [N], or give one dict")
         try:
-            b = bcls(vehicle, shared, seeds)
+            if array_api != "numpy":
+                b = bcls(vehicle, shared, seeds, xp=xpmod.namespace(array_api, device))
+            else:
+                b = bcls(vehicle, shared, seeds)
         except comp.ComponentError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -356,6 +408,7 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None):
                              f"{type(e).__name__}: {e}") from e
         b.n = len(seeds)
         b.vectorised = getattr(b, "vectorised", True)
+        b.array_api_in_use = array_api
         return check_batch(b, name)
     each = per_slot if per_slot is not None else [shared] * len(seeds)
     if given:
