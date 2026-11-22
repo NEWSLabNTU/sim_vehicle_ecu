@@ -55,6 +55,9 @@ FIELDS = (
     "steer_time_constant", "steer_rate_limit", "est_slip_offset", "est_sideslip_washout",
     "est_mu_margin", "est_mu_floor", "est_mu_max", "est_mu_recover_rate",
 )
+# xp.sin_cos is accurate for |x| <= 1.6 (review of 2026-11-23): the tire angle, clipped to
+# max_steer_angle, must stay within it
+SIN_COS_LIMIT = 1.6
 
 
 def _derived(c):
@@ -213,6 +216,12 @@ class EvBatch:
         n = self.n = len(seeds)
         self.seeds = list(seeds)
         self.cals = cals = _calibrations(vehicle, params or {}, n)
+        from .batch import BatchError
+        for k, c in enumerate(cals):
+            if not abs(c.max_steer_angle) <= SIN_COS_LIMIT:
+                raise BatchError(f"ev: slot {k}: max_steer_angle {c.max_steer_angle} rad is past "
+                                 f"{SIN_COS_LIMIT}, where xp.sin_cos (the batch's sine and cosine "
+                                 "of the tire angle) stops being accurate; run the scalar form")
         c0 = cals[0]
         pt = EvPowertrain(c0)
         self.front_share = pt.front_share

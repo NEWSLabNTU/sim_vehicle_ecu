@@ -210,3 +210,11 @@ def test_a_gpu_step_never_waits_for_the_device(monkeypatch):
     finally:
         if debug:
             torch.cuda.set_sync_debug_mode("default")
+
+
+def test_a_steer_limit_past_sin_cos_is_refused():
+    """xp.sin_cos is accurate for |x| <= 1.6 only (241): a car steering further is refused."""
+    import pytest
+    from sim_vehicle_ecu.batch import BatchError
+    with pytest.raises(BatchError, match="max_steer_angle"):
+        B.load_batch("ev", MODEL3, {"max_steer_angle": 1.7}, [1, 2])
