@@ -61,8 +61,8 @@ class Calibration:
     brake_floor: float = 50.0  # N m
     # ABS: per wheel, on longitudinal slip against the direction of travel
     abs_enabled: bool = True
-    abs_slip_release: float = 0.25
-    abs_slip_reapply: float = 0.15
+    abs_slip_release: float = 0.2   # the Model 3's (scensim issue 100: 0.25 / 0.15 until 2026-11-22)
+    abs_slip_reapply: float = 0.05
     abs_release_rate: float = 8.0  # 1/s, of the brake pressure factor
     abs_apply_rate: float = 4.0  # 1/s
     abs_min_speed: float = 1.5  # m/s
@@ -231,15 +231,16 @@ def spec_values(doc):
     for key in ("rolling_coefficient", "drag_coefficient", "frontal_area"):
         values[key] = (rs or {}).get(key, getattr(base, key) if rs is not None else 0.0)
     values["air_density"] = (rs or {}).get("air_density", base.air_density)
-    # The estimate's slip is over |v| + an offset, as PhysX's is: PhysX 5 adds its
-    # min*SlipDenominator to the contact point's speed, (omega r - v) / (|v| + d), not as a
-    # floor (physxvehicle/src/tire/VhTireFunctions.cpp, computeLongitudionalSlip and
-    # computeLateralSlip; only the legacy passive path takes a max). These are the slips ABS
-    # and TC were tuned on: a spec's isaac.physx.min_active_slip_denominator, else the
-    # full-size car's 4 m/s. A small car sets its own (scensim roadmap 091 W6): at
-    # 4 m/s a car whose speeds are 0.5 to 8 m/s would see almost no slip.
-    physx = (doc.get("isaac") or {}).get("physx") or {}
-    values["est_slip_offset"] = physx.get("min_active_slip_denominator", base.est_slip_offset)
+    # The estimate's slip is over |v| + an offset: a spec's brakes.estimator.slip_offset, else
+    # the full-size car's 4 m/s. It is the brake module's own definition, which its ABS and TC
+    # thresholds are tuned against. It is not the simulator's tyre: PhysX also adds a
+    # min*SlipDenominator to its speeds (VhTireFunctions.cpp), but the car's computer cannot know
+    # that, and a car retuned on Isaac keeps its estimate (scensim issue 100, 2026-11-22: the
+    # estimate followed isaac.physx.min_active_slip_denominator until then; at the Model 3's
+    # new 1 m/s, the TC limits tuned for 4 latched off at a launch, issue 103). A small car sets
+    # its own (scensim roadmap 091 W6: the RoboRacer's 0.5).
+    est = b.get("estimator") or {}
+    values["est_slip_offset"] = est.get("slip_offset", base.est_slip_offset)
     out = {}
     for k, v in values.items():
         default = getattr(base, k)

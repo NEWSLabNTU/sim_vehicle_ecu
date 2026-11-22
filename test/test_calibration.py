@@ -15,8 +15,9 @@ MODEL3 = {
     "tires": {"friction": 1.0},
     "brakes": {"max_brake_torque": 3000.0, "hold_brake_torque": 1500.0,
                "distribution": "dynamic_axle_load", "dead_time": 0.08, "time_constant": 0.06,
-               "abs": {"enabled": True, "slip_release": 0.25, "slip_reapply": 0.15,
-                       "release_rate": 8.0, "apply_rate": 4.0, "min_speed": 1.5}},
+               "abs": {"enabled": True, "slip_release": 0.2, "slip_reapply": 0.05,
+                       "release_rate": 8.0, "apply_rate": 4.0, "min_speed": 1.5},
+               "estimator": {"slip_offset": 4.0}},
     "powertrain": {"model": "ev", "max_drive_torque": 1500.0, "drive_axle": "rear",
                    "gear_ratio": 10.0, "motor_peak_torque": 340.0, "motor_peak_power": 194000.0,
                    "motor_max_rpm": 15200.0, "motor_time_constant": 0.04,
@@ -76,11 +77,17 @@ class FromSpecTest(unittest.TestCase):
         self.assertEqual((c.rolling_coefficient, c.drag_coefficient, c.frontal_area),
                          (0.0, 0.0, 0.0))
 
-    def test_the_slip_offset_is_physx_min_active_slip_denominator(self):
+    def test_the_slip_offset_is_the_brake_modules_own(self):
+        """brakes.estimator.slip_offset, else 4 m/s; never the simulator's tyre (scensim
+        issue 100): a PhysX denominator does not move it."""
         self.assertEqual(Calibration.from_spec(MODEL3).est_slip_offset, 4.0)
         doc = copy.deepcopy(MODEL3)
-        doc["isaac"] = {"physx": {"min_active_slip_denominator": 0.5}}
+        doc["brakes"]["estimator"] = {"slip_offset": 0.5}
         self.assertEqual(Calibration.from_spec(doc).est_slip_offset, 0.5)
+        doc = copy.deepcopy(MODEL3)
+        doc["brakes"].pop("estimator", None)
+        doc["isaac"] = {"physx": {"min_active_slip_denominator": 0.5}}
+        self.assertEqual(Calibration.from_spec(doc).est_slip_offset, 4.0)
 
     def test_the_tire_friction_is_the_lower_axles(self):
         doc = copy.deepcopy(MODEL3)

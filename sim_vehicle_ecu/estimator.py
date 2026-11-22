@@ -13,10 +13,10 @@ and Control*, ch. 8 and 14). This one does it the textbook way:
   traction control works a wheel, when none of the wheels can be trusted; under ABS the
   fastest wheel is a bound from below, so the estimate rises to it at once and sinks toward
   it only at `est_speed_gain_bound`. The first reading after a reset is the wheels' mean.
-- **Slip**: each wheel's road speed against the reference, over `|v| + est_slip_offset`:
-  PhysX's own definition (its tire adds its minimum slip denominator, 4 m/s on the rig, to
-  the speed), the one the ABS and TC thresholds were tuned against when they read PhysX's
-  slip. A `max(|v|, 4)` read up to twice that at town speeds (scensim issue
+- **Slip**: each wheel's road speed against the reference, over `|v| + est_slip_offset`
+  (the spec's brakes.estimator.slip_offset, 4 m/s on the Model 3): the brake module's own
+  definition, which the ABS and TC thresholds are tuned against, independent of the
+  simulator's tyre (scensim issue 100). A `max(|v|, 4)` read up to twice that at town speeds (scensim issue
   009). In a turn each wheel's own road speed differs from the car's: the yaw rate moves the
   outer wheels faster and the inner slower, and a steered front wheel rolls along its own
   heading. So each wheel speed is held against the speed its place on the car gives (the
