@@ -231,9 +231,12 @@ def spec_values(doc):
     for key in ("rolling_coefficient", "drag_coefficient", "frontal_area"):
         values[key] = (rs or {}).get(key, getattr(base, key) if rs is not None else 0.0)
     values["air_density"] = (rs or {}).get("air_density", base.air_density)
-    # The estimate's slip is over |v| + an offset, PhysX's floor on the slip's denominator
-    # (the slips ABS and TC were tuned on): a spec's isaac.physx.min_active_slip_denominator,
-    # else the full-size car's 4 m/s. A small car sets its own (scensim roadmap 091 W6): at
+    # The estimate's slip is over |v| + an offset, as PhysX's is: PhysX 5 adds its
+    # min*SlipDenominator to the contact point's speed, (omega r - v) / (|v| + d), not as a
+    # floor (physxvehicle/src/tire/VhTireFunctions.cpp, computeLongitudionalSlip and
+    # computeLateralSlip; only the legacy passive path takes a max). These are the slips ABS
+    # and TC were tuned on: a spec's isaac.physx.min_active_slip_denominator, else the
+    # full-size car's 4 m/s. A small car sets its own (scensim roadmap 091 W6): at
     # 4 m/s a car whose speeds are 0.5 to 8 m/s would see almost no slip.
     physx = (doc.get("isaac") or {}).get("physx") or {}
     values["est_slip_offset"] = physx.get("min_active_slip_denominator", base.est_slip_offset)
