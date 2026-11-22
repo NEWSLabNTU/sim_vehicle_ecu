@@ -46,3 +46,30 @@ def test_a_batch_without_it_is_refused():
     assert X.supports(NumpyOnly, "numpy") and not X.supports(NumpyOnly, "torch")
     with pytest.raises(B.BatchError, match="no batched form on array_api 'torch'"):
         B.load_batch(Car, {}, {}, [1], array_api="torch")
+
+
+def test_hypot_is_math_hypot_and_sin_cos_within_a_few_ulp():
+    import math
+    ns = X.namespace("numpy")
+    rng = np.random.default_rng(1)
+    a, b = rng.normal(0, 5, 20000), rng.normal(0, 5, 20000)
+    a[:10] = 0.0
+    want = np.array([math.hypot(x, y) for x, y in zip(a.tolist(), b.tolist())])
+    assert X.hypot(ns, a, b).tobytes() == want.tobytes()
+    x = np.concatenate([rng.uniform(-1.2, 1.2, 20000), [0.0, -0.0]])
+    s, c = X.sin_cos(ns, x)
+    for got, f in ((s, math.sin), (c, math.cos), (s / c, math.tan)):
+        ref = np.array([f(v) for v in x.tolist()])
+        assert np.max(np.abs(got - ref) / np.spacing(np.abs(ref) + 1e-300)) <= 4
+    assert s[-2:].tobytes() == np.array([0.0, -0.0]).tobytes() and c[-2:].tolist() == [1.0, 1.0]
+
+
+def test_hypot_and_sin_cos_are_the_same_bits_on_torch():
+    torch = pytest.importorskip("torch")
+    rng = np.random.default_rng(2)
+    a, b = rng.normal(0, 5, 5000), rng.uniform(-1.2, 1.2, 5000)
+    ns, ts = X.namespace("numpy"), X.namespace("torch", "cpu")
+    ta, tb = torch.as_tensor(a), torch.as_tensor(b)
+    assert X.hypot(ns, a, b).tobytes() == X.hypot(ts, ta, tb).numpy().tobytes()
+    for u, v in zip(X.sin_cos(ns, b), X.sin_cos(ts, tb)):
+        assert u.tobytes() == v.numpy().tobytes()

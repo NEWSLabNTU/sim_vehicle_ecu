@@ -1,5 +1,5 @@
 """The batched form (scensim roadmap 092 S3): step_batch over N slots equals N independent
-scalar steps, bit for bit, for a vectorised component and for the LoopBatch of any other (ev,
+scalar steps, bit for bit, for a vectorised component and for the LoopBatch of any other (ideal,
 the fmu over N instances); per-slot seeds; resets by mask; the checks name what is wrong."""
 
 import numpy as np
@@ -39,10 +39,11 @@ def test_per_slot_seeds_are_what_single_cars_get():
     assert a[0] == LagScalar({}, {"noise": 0.05}, 5).step(VescCommand(), None, DT).tire_angle
 
 
-def test_loopbatch_of_ev_equals_n_ev_cars_and_is_flagged():
+def test_loopbatch_of_ideal_equals_n_ideal_cars_and_is_flagged():
+    """`ideal` has no batched form (`ev` has: test_ev_batch.py)."""
     seeds = [1, 2, 3, 4]
-    b = B.load_batch("ev", MODEL3, None, seeds)
-    assert isinstance(b, B.LoopBatch) and not b.vectorised and b.loop_of == "ev"
+    b = B.load_batch("ideal", MODEL3, None, seeds)
+    assert isinstance(b, B.LoopBatch) and not b.vectorised and b.loop_of == "ideal"
     rng = np.random.default_rng(4)
     runs = []
     for k in range(240):
@@ -53,9 +54,9 @@ def test_loopbatch_of_ev_equals_n_ev_cars_and_is_flagged():
         v = 0.05 * k
         sens = [None if k == 0 else Sensors((v / 0.37,) * 4, 0.01, 1.0, 0.0) for _ in seeds]
         runs.append((cmds, sens, rng.random(4) < 0.02))
-    run_both(b, [comp.load("ev", MODEL3, None, s) for s in seeds], 0, kind="autoware",
+    run_both(b, [comp.load("ideal", MODEL3, None, s) for s in seeds], 0, kind="autoware",
              truth=(), runs=runs)
-    with pytest.raises(B.BatchError, match=r"ev: has no batched form \(it runs as LoopBatch"):
+    with pytest.raises(B.BatchError, match=r"ideal: has no batched form \(it runs as LoopBatch"):
         B.require_vectorised(b)
     assert B.require_vectorised(B.load_batch(Lag, {}, {}, [1])) is not None
 

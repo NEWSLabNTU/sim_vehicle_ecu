@@ -41,6 +41,7 @@ from importlib import metadata
 
 from .calibration import Calibration
 from .ecu import Ecu
+from .ev_batch import EvBatch
 
 GROUP = "scensim.vehicle_components"
 # What a component may take, and the command its `step` gets for each (signals): the vehicle
@@ -113,7 +114,12 @@ class Ideal(EcuComponent):
 
 
 class Ev(EcuComponent):
+    """The scalar form stays `Ecu` itself (its `debug`, `from_calibration`); `batch` is the
+    vectorised form `load_batch("ev", ...)` builds (sim_vehicle_ecu.ev_batch), equal to it slot
+    by slot (test/test_ev_batch.py)."""
+
     powertrain = "ev"
+    batch = EvBatch
 
 
 def _entry_point(name):

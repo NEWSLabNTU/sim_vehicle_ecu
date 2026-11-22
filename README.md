@@ -182,10 +182,11 @@ shared dict as N equal slots (bools as bool, ints as int64, other numbers as flo
 does not is refused per-slot params by name. Only numbers and bools vary per slot.
 
 A component with a batched form declares `batch = <class>` (built as `cls(vehicle, params,
-seeds)`), and `batch.ScalarOf` gives its scalar form from it, so the two are one code. Every
-other component, `ideal`, `ev` and `fmu` included, runs as `LoopBatch`: N instances, each stepped
-by `step`. That is correct, but it is one Python step per slot, and `vectorised = False`, so
-`require_vectorised` refuses it by name. numpy is imported by `batch` only.
+seeds)`), and `batch.ScalarOf` gives its scalar form from it, so the two are one code. `ev` has
+one (below). Every other component, `ideal` and `fmu` included, runs as `LoopBatch`: N
+instances, each stepped by `step`. That is correct, but it is one Python step per slot, and
+`vectorised = False`, so `require_vectorised` refuses it by name. numpy is imported by `batch`
+only.
 
 For a component author, the batched form equals N scalar steps bit for bit only when both forms
 compute elementwise with `+ - * /`, sqrt, min/max/clip, where and comparisons:
@@ -196,6 +197,37 @@ compute elementwise with `+ - * /`, sqrt, min/max/clip, where and comparisons:
   `((w[0] + w[1]) + w[2]) + w[3]`. Never use `np.sum` or `np.mean`, which add pairwise, and
   never use `sum()`. Python 3.12's built-in `sum()` of floats is compensated, unlike 3.10's,
   so the same scalar code gives other last bits in Isaac's Python than in the system's.
+
+### `ev` batched: EvBatch
+
+`load_batch("ev", vehicle, params, seeds, array_api="numpy" | "torch", device=...)` builds
+`sim_vehicle_ecu.ev_batch.EvBatch`: the whole `Ecu` (steering, estimates, ESC, the `ev`
+powertrain with ABS, TC, regen blending and its slip control, the differentials, the brakes'
+dead time and lag) written once over `xp`, every branch a mask, every expression the scalar's
+in its order. The scalar `ev` is still `Ecu` (its `debug` and `from_calibration` stay); the two
+are held together by `test/test_ev_batch.py`, which drives N slots on scripted inputs that
+force every branch (ABS release and reapply, TC, ESC, holds and gears, regen slip events and
+the axle grip found, capped and forgotten, sensor dropouts, resets of some slots mid-run) with
+the scalar car per slot alongside, and compares every actuation and the state behind it.
+
+- **Bit for bit** on numpy with the scalar `Ecu` (Python 3.10) while the tire angle is 0. A car
+  that steers differs in the last bits: the tire angle's sin, cos and tan are `xp.sin_cos`
+  (a series in exact operations, the same bits on numpy and torch, CPU and GPU), not glibc's,
+  which is not correctly rounded either; seen 2e-14 relative at most, tested within 1e-9. On
+  Python 3.12 the scalar's own `sum()` is compensated and its last bits move (the test allows
+  1e-12 there). `math.hypot` is `xp.hypot`, correctly rounded as CPython's: the same bits.
+- **torch equals numpy bit for bit**, on the CPU and on CUDA. Lag factors (`1 - exp(-dt/tau)`)
+  are made on the host with `math.exp` per slot and per `dt`, and kept on the device; divisors
+  are arrays (torch on CUDA divides by a Python number through its reciprocal).
+- **No host sync** in a step on a GPU once `dt` is known (the dead time's ring grows from the
+  host when `dt` shrinks); `test_a_gpu_step_never_waits_for_the_device` checks it.
+- **Per slot**: `per_slot_params`, so calibration numbers and bools may differ between slots
+  (`esc_enabled`, `abs_slip_release`, a dead time of 0, ...); the powertrain's shape
+  (`drive_axle`, `front_drive_share`, `diff_type`, `brake_distribution`) is one for all.
+  `reset_batch(mask)` resets the masked slots. A slot with no command yet steps on `Request()`.
+- **Speed** (`python3 test/bench_batch.py`): the scalar Ecu costs 27-40 us a slot (0.4-0.6 ms a
+  step at N = 16, ~30-40 ms at 1024); EvBatch at N = 1024 takes ~0.8-1.0 ms a step on numpy and
+  ~4.7 ms on CUDA (flat in N: one kernel per operation, launch-bound).
 
 ## Develop
 
