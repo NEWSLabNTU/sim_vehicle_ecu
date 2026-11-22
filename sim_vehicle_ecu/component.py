@@ -42,6 +42,7 @@ from importlib import metadata
 from .calibration import Calibration
 from .ecu import Ecu
 from .ev_batch import EvBatch
+from .signals import Request
 
 GROUP = "scensim.vehicle_components"
 # What a component may take, and the command its `step` gets for each (signals): the vehicle
@@ -106,7 +107,9 @@ class EcuComponent:
         self.ecu.reset()
 
     def step(self, command, sensors, dt):
-        return self.ecu.step(command, sensors, dt)
+        # autoware's command is None before the first (the contract above): the car's default
+        # request, standing in drive, as the batch forms take it (scensim issue 107)
+        return self.ecu.step(command if command is not None else Request(), sensors, dt)
 
 
 class Ideal(EcuComponent):

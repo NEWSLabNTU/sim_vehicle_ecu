@@ -230,3 +230,12 @@ def test_the_command_types_of_the_other_interfaces():
     v = signals.VescCommand()
     assert v.motor is None and v.servo is None and v.age == math.inf
     assert signals.VescCommand("speed", 4614.0, 0.53, 0.01).motor in signals.MOTOR_MODES
+
+
+def test_no_autoware_command_yet_is_the_default_request():
+    """The contract gives an autoware component None before the first command; the scalar Ecu
+    took it as a Request and failed (scensim issue 107). It steps as Request() does."""
+    for cls in (comp.Ev, comp.Ideal):
+        a, b = cls(MODEL3), cls(MODEL3)
+        for sensors in (None, Sensors((0.0,) * 4, 0.0, 0.0, 0.0)):
+            assert a.step(None, sensors, 1 / 60) == b.step(Request(), sensors, 1 / 60)
