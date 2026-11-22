@@ -275,6 +275,7 @@ class EvBatch:
         self.slip_event, self.regen_capped, self.regen_excess = f(), f(), f()
         self.last_spins = [z() for _ in range(1 if self.locked else sum(self.driven))]
         self.spins_known = f()
+        self.last_slower, self.slower_known = z(), f()
         self.since_spin = xp.full(n, xp.inf)
         self.abs_event = f()
         self.wind = [z(), z()]
@@ -713,7 +714,11 @@ class EvBatch:
             least = _mn(xp, least, x)
         slower = direction * accel - least
         runaway = have & short & (lock > p["regen_runaway_slip"]) & (slower > p["regen_runaway_decel"])
-        growing = have & settled & (slower > p["regen_slip_growth"])
+        # not while the excess falls (a wheel settling from a wheelspin; scensim issue 106)
+        falling = self.slower_known & (slower < self.last_slower)
+        growing = have & settled & (slower > p["regen_slip_growth"]) & ~falling
+        self.last_slower = xp.where(have, slower, 0.0)
+        self.slower_known = have
         self.last_spins = [xp.where(sv, u, u0) for u, u0 in zip(spins, self.last_spins)]
         self.spins_known = sv
         rsc_active = self.rsc_f < 1.0
@@ -769,7 +774,7 @@ class EvBatch:
 _STATE = ("tire_angle", "has_last", "last_braking", "speed", "started", "sideslip", "friction",
           "motor_factor", "motor_torque", "tc_f", "rsc_f", "axle_mu", "axle_known",
           "mu_measured", "mu_known", "slip_event", "regen_capped", "regen_excess",
-          "spins_known", "since_spin", "abs_event")
+          "spins_known", "last_slower", "slower_known", "since_spin", "abs_event")
 # and its per-wheel and per-axle lists
 _LISTS = ("esc_brake", "pressure", "abs_f", "last_spins", "wind")
 

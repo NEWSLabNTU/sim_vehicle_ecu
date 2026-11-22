@@ -219,6 +219,7 @@ class EvPowertrain(Powertrain):
         self.regen_capped = False  # last step's regen was held at the cap
         self.regen_excess = False  # last step's regen asked beyond the driven axle's share
         self.last_spins = None  # the driven wheels' peripheral speeds last step, m/s
+        self.last_slower = None  # last step's driven-wheel deceleration past the car's, m/s^2
         self.since_spin = math.inf  # s since the driven wheels were last in a drive slip
         self.abs_event = False  # ABS has worked a wheel in this stop: no regen until it ends
         self.wind = [0.0, 0.0]  # per axle (front, rear): the coupling's held torque, N m
@@ -411,14 +412,20 @@ class EvPowertrain(Powertrain):
         short = carried is None or (settled
                                     and carried < (1.0 - c.regen_runaway_deficit) * applied)
         runaway = growing = False
-        rate = None  # the driven wheels' mean peripheral acceleration, m/s^2
+        rate = slower = None  # the driven wheels' mean peripheral acceleration, m/s^2
         if spins and self.last_spins and len(spins) == len(self.last_spins):
             rates = [(u - u0) / dt for u, u0 in zip(spins, self.last_spins)]
             rate = sum(rates) / len(rates)
             if carried is not None:
                 slower = direction * accel - min(rates)  # the wheels' deceleration past the car's
                 runaway = short and lock > c.regen_runaway_slip and slower > c.regen_runaway_decel
-                growing = settled and slower > c.regen_slip_growth
+                # a wheel settling from a wheelspin slows past the car by less every step (57,
+                # 38, 25, 17, 11.5 m/s^2 on the Model 3, issue 106) and is still past
+                # regen_slip_growth when the settle time ends; a tyre past its peak holds or
+                # gains it. So growing only while it does not fall.
+                falling = self.last_slower is not None and slower < self.last_slower
+                growing = settled and slower > c.regen_slip_growth and not falling
+        self.last_slower = slower if rate is not None and carried is not None else None
         self.last_spins = spins
         slipped = lock > c.regen_slip_release and (short or growing or self.rsc.active)
         limit = runaway or slipped

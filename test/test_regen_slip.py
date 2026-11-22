@@ -146,6 +146,34 @@ class RegenSlipControlTest(unittest.TestCase):
             self.assertEqual(la, lb)
             self.assertIsNone(a.powertrain.axle_mu)
 
+    def test_a_wheel_down_from_a_wheelspin_at_a_low_release_is_not_a_slip(self):
+        # issue 106: at a release slip of 0.15 (the Model 3's, below ABS's 0.2) the settling
+        # wheel still slows past the car by more than regen_slip_growth when regen_spin_settle
+        # ends (57, 38, 25, 17, 11.5 m/s^2): read as a growing slip, regen was cut and a false
+        # grip of 0.16 kept. The excess falls every step, which a slip past the peak does not.
+        from test_calibration import MODEL3
+        cars = (("drift", lambda **o: drift_car(**o)),
+                ("model3", lambda **o: Calibration.from_spec(MODEL3, o)))
+        for name, car in cars:
+            for release in (0.15, 0.25):
+                for spin in (1.3, 1.6):
+                    a, _, _, la = drive(car(regen_slip_release=release), -1.2, 1.0, 0.3, 0.2,
+                                        sliding=1.0, spin=spin)
+                    b, _, _, lb = drive(car(regen_slip_release=release, regen_slip_control=False),
+                                        -1.2, 1.0, 0.3, 0.2, sliding=1.0, spin=spin)
+                    self.assertEqual(la, lb, (name, release, spin))
+                    self.assertIsNone(a.powertrain.axle_mu, (name, release, spin))
+
+    def test_on_ice_a_low_release_still_finds_the_grip(self):
+        # issue 106: the guard above must not hide a real slip; ICE as the test below
+        from test_calibration import MODEL3
+        for c in (drift_car(regen_slip_release=0.15),
+                  Calibration.from_spec(MODEL3, {"regen_slip_release": 0.15})):
+            ecu, worst, _, _ = drive(c, -1.8, 2.0, *self.ICE)
+            self.assertLess(worst, 0.05)
+            self.assertIsNotNone(ecu.powertrain.axle_mu)
+            self.assertAlmostEqual(ecu.powertrain.axle_mu, 0.25, delta=0.05)
+
     def test_on_ice_out_of_a_wheelspin_the_grip_is_still_found(self):
         c = drift_car()
         ecu, worst, _, _ = drive(c, -1.8, 2.0, *self.ICE, spin=1.5)

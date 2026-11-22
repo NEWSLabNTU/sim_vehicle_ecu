@@ -218,3 +218,29 @@ def test_a_steer_limit_past_sin_cos_is_refused():
     from sim_vehicle_ecu.batch import BatchError
     with pytest.raises(BatchError, match="max_steer_angle"):
         B.load_batch("ev", MODEL3, {"max_steer_angle": 1.7}, [1, 2])
+
+
+def test_a_wheel_settling_from_a_wheelspin_is_the_scalar_cars():
+    """Issue 106's detector change, slot for slot: the scalar's run of a wheel coming down from
+    a wheelspin into regen at a release of 0.15 (test_regen_slip's case), its every request and
+    sensor reading replayed into the batch, gives the same actuation bit for bit."""
+    import test_regen_slip as R
+    over = {"regen_slip_release": 0.15}
+    c = Calibration.from_spec(MODEL3, dict(over, powertrain="ev"))
+    feed = []
+
+    class Rec(Ecu):
+        def step(self, request, sensors, dt):
+            out = super().step(request, sensors, dt)
+            feed.append((request, sensors, dt, out))
+            return out
+    for spin in (1.3, 2.0):
+        feed.clear()
+        R.drive(c, -1.2, 1.0, 0.3, 0.2, sliding=1.0, spin=spin, ecu=Rec(c))
+        b = B.load_batch("ev", MODEL3, over, [0])
+        b.reset_batch(np.ones(1, bool))
+        for request, sensors, dt, want in feed:
+            act = B.batch_to_actuations(b.step_batch(B.commands_to_batch("autoware", [request]),
+                                                     B.sensors_to_batch([sensors]), dt))[0]
+            assert E._bits(act.drive) == E._bits(want.drive), spin
+            assert E._bits(act.brake) == E._bits(want.brake), spin

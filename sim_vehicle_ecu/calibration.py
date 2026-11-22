@@ -77,7 +77,9 @@ class Calibration:
     # held within a share of the driven axle's grip once the car has found it. Not a driver aid
     # the spec can switch off with ABS: the motor's braking is the brake module's to blend.
     regen_slip_control: bool = True
-    regen_slip_release: float = 0.25  # the driven wheels' braking slip past which regen falls
+    # the driven wheels' braking slip past which regen falls: below ABS's release, so regen is
+    # given up first (the Model 3's; scensim issue 106: 0.25 until 2026-11-23, above ABS's 0.2)
+    regen_slip_release: float = 0.15
     regen_slip_reapply: float = 0.05  # within which it comes back
     regen_runaway_slip: float = 0.06  # past this braking slip, a driven wheel
     regen_runaway_decel: float = 29.4  # m/s^2 (3 g) slowing this much faster than the car, its
