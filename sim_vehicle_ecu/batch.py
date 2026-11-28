@@ -291,10 +291,12 @@ class ScalarOf:
 
     batch = None
 
-    def __init__(self, vehicle, params=None, seed=0):
+    def __init__(self, vehicle, params=None, seed=0, session=None):
         if self.batch is None:
             raise BatchError(f"{type(self).__name__}: ScalarOf needs `batch = <class>`")
-        self._b = self.batch(vehicle, dict(params or {}), [int(seed)])
+        kw = ({"session": {k: np.asarray([float(v)], DTYPE) for k, v in session.items()}}
+              if session else {})   # the declared session inputs, one slot's (091 W12)
+        self._b = self.batch(vehicle, dict(params or {}), [int(seed)], **kw)
         self.commands = self._b.commands
         self.truth = tuple(getattr(self._b, "truth", ()))
         self.driven = getattr(self._b, "driven", (True,) * 4)
@@ -358,8 +360,17 @@ def _all_equal(vals):
         return False
 
 
+def slot_sessions(session, n, name="component"):
+    """`session` as load_batch takes it (None, one record, or a list of N records) as N."""
+    if isinstance(session, (list, tuple)):
+        if len(session) != n:
+            raise BatchError(f"{name}: {len(session)} session records for {n} slots")
+        return list(session)
+    return [session] * n
+
+
 def load_batch(name, vehicle, params=None, seeds=(0,), base=None, array_api="numpy",
-               device=None):
+               device=None, session=None):
     """N slots of the component `name`, one per seed: its `batch` class when it has one
     (vectorised), else a LoopBatch of N instances (`fmu`: N instances of the one unit, its
     canBeInstantiatedOnlyOncePerProcess refused as for two cars).
@@ -373,7 +384,11 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None, array_api="num
     sample varying the car, a fit's candidates). A LoopBatch builds instance i from dict i. A
     batch class that declares `per_slot_params = True` always gets one dict of per-key arrays
     [N] (`per_key`; a shared dict as N equal slots), so it has one code path; one that does
-    not gets the shared dict, and per-slot params are refused for it by name."""
+    not gets the shared dict, and per-slot params are refused for it by name.
+
+    `session`: the run's session record (scensim.session/1), one for every slot or a list of N
+    (slot i's). A batch class that declares session inputs (091 W12) gets them at construction,
+    `session={name: array [N]}`; a LoopBatch builds instance i with record i."""
     seeds = [int(s) for s in seeds]
     if not seeds:
         raise BatchError(f"{name}: a batch of no slots")
@@ -382,6 +397,7 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None, array_api="num
     cls = name if given else comp.resolve(name)
     name = cls.__name__ if given else name
     bcls = getattr(cls, "batch", None)
+    sessions = slot_sessions(session, len(seeds), name)
     if array_api != "numpy":
         from . import xp as xpmod
         if bcls is None or not xpmod.supports(bcls, array_api):
@@ -396,11 +412,16 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None, array_api="num
             raise BatchError(f"{name}: per-slot params, but its batch class does not take "
                              "them (per_slot_params); fix: declare it and read params as "
                              "arrays [N], or give one dict")
+        declared = comp.declared_session(bcls, name, BatchError)
+        kw = {}
+        if declared:
+            values = [comp.session_values(declared, s, name) for s in sessions]
+            kw["session"] = {k: np.asarray([v[k] for v in values], DTYPE) for k in declared}
         try:
             if array_api != "numpy":
-                b = bcls(vehicle, shared, seeds, xp=xpmod.namespace(array_api, device))
+                b = bcls(vehicle, shared, seeds, xp=xpmod.namespace(array_api, device), **kw)
             else:
-                b = bcls(vehicle, shared, seeds)
+                b = bcls(vehicle, shared, seeds, **kw)
         except comp.ComponentError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -412,9 +433,15 @@ def load_batch(name, vehicle, params=None, seeds=(0,), base=None, array_api="num
         return check_batch(b, name)
     each = per_slot if per_slot is not None else [shared] * len(seeds)
     if given:
-        return LoopBatch([comp.check(cls(vehicle, dict(p), s), name)
-                          for p, s in zip(each, seeds)], name)
-    return LoopBatch([comp.load(name, vehicle, p, s, base) for p, s in zip(each, seeds)], name)
+        declared = comp.declared_session(cls, name)
+        made = []
+        for p, s, rec in zip(each, seeds, sessions):
+            values = comp.session_values(declared, rec, name)
+            kw = {"session": values} if values is not None else {}
+            made.append(comp.check(cls(vehicle, dict(p), s, **kw), name))
+        return LoopBatch(made, name)
+    return LoopBatch([comp.load(name, vehicle, p, s, base, rec)
+                      for p, s, rec in zip(each, seeds, sessions)], name)
 
 
 def check_batch(b, name="component"):
@@ -428,10 +455,11 @@ def check_batch(b, name="component"):
     truth = getattr(b, "truth", ())
     if not isinstance(truth, (tuple, list)) or any(t not in comp.TRUTH_INPUTS for t in truth):
         raise BatchError(f"{name}: truth = {truth!r}: a tuple of {', '.join(comp.TRUTH_INPUTS)}")
+    comp.declared_session(type(b), name, BatchError)
     return b
 
 
 __all__ = ["ACTUATION_FIELDS", "BatchError", "COMMAND_FIELDS", "LoopBatch", "SENSOR_FIELDS",
            "ScalarOf", "actuations_to_batch", "batch_to_actuations", "batch_to_commands",
            "batch_to_sensors", "checked_batch", "commands_to_batch", "load_batch",
-           "per_key", "require_vectorised", "sensors_to_batch", "slot_params"]
+           "per_key", "require_vectorised", "sensors_to_batch", "slot_params", "slot_sessions"]

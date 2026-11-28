@@ -73,7 +73,10 @@ The interface (`commands`, `__init__(vehicle, params, seed)`, `reset()`, `step(c
 dt)`) and its rules are in `sim_vehicle_ecu/component.py` and in scensim's
 docs/design/roboracer-indoor-twin.md. It sees the car's own sensors; ground truth only as it
 declares it (`truth = ("speed", ...)`, from `TRUTH_INPUTS`: what its user also measured on the
-real car), in `sensors.truth`, through a `TruthFeed` with each input's latency and noise.
+real car), in `sensors.truth`, through a `TruthFeed` with each input's latency and noise. The
+session's conditions only as its class declares them (`session = ("battery_v",)`, from
+`SESSION_INPUTS`): constants for the run, given at construction (`session={name: value}`), from
+the run's session record (scensim roadmap 091 W12).
 `ideal` and `ev` are components too (`Ecu` with that
 powertrain), declared in the same group. The component must be pure Python: Isaac Sim's
 interpreter imports it.

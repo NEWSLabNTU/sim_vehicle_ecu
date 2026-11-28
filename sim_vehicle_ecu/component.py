@@ -28,6 +28,14 @@ The interface (docs/design/roboracer-indoor-twin.md in scensim, section 2):
   (`truth = ("speed", ...)`), only quantities its user also measured on the real car (motion
   capture, say); it gets them in `sensors.truth`, a mapping of the declared names only, through
   a `TruthFeed` (each with its own latency and noise, set per run).
+- Session conditions: none by default. A component class may declare inputs from
+  `SESSION_INPUTS` (`session = ("battery_v",)`), the conditions of the run's session (scensim
+  roadmap 091 W12: the battery's voltage, measured before the run). They are constants for the
+  run, so it gets them when it is constructed, `cls(vehicle, params, seed, session={name:
+  value})`, not in each step's sensors (None on the first step after a reset). `load` reads
+  them from the run's session record (`scensim.session/1`) at `SESSION_SOURCES`' paths and
+  refuses a declared one the record lacks; a class that declares nothing is constructed as
+  before.
 
 Components are found by name: the entry points of group `GROUP` in the importing interpreter
 (a user's package declares its own), and the shipped ones, `ideal` and `ev` (`Ecu` with that
@@ -63,6 +71,12 @@ TRUTH_INPUTS = {
     "sideslip": "rad: the body's sideslip angle",
 }
 TRUTH_SETTINGS = ("latency_s", "noise_std")
+# The session conditions a component may declare (scensim roadmap 091 W12), with their unit, and
+# where each is in the session record (scensim.session/1).
+SESSION_INPUTS = {
+    "battery_v": "V: the battery pack's voltage at the session's start (a constant for the run)",
+}
+SESSION_SOURCES = {"battery_v": ("battery", "voltage_v")}
 
 
 class ComponentError(RuntimeError):
@@ -178,16 +192,56 @@ def check(component, name="component"):
     return component
 
 
-def load(name, vehicle, params=None, seed=0, base=None):
+def declared_session(cls, name="component", error=ComponentError):
+    """The session inputs a component class declares (a ScalarOf's: its batch class's), checked."""
+    session = getattr(cls, "session", None)
+    if session is None:
+        session = getattr(getattr(cls, "batch", None), "session", ())
+    if (not isinstance(session, (tuple, list))
+            or any(s not in SESSION_INPUTS for s in session)):
+        raise error(f"{name}: session = {session!r}: a tuple of {', '.join(SESSION_INPUTS)}")
+    return tuple(session)
+
+
+def session_values(names, session, name="component"):
+    """The values of the session inputs `names`, {name: value}, from `session` (the run's
+    session record, a mapping; None: none given); None for no names. A declared input the
+    record lacks, or one that is not a number, is refused (ComponentError), naming the
+    record's key."""
+    if not names:
+        return None
+    out = {}
+    for n in names:
+        path = SESSION_SOURCES[n]
+        key = "session." + ".".join(path)
+        v = session
+        for k in path:
+            v = v.get(k) if isinstance(v, dict) else None
+        if v is None:
+            raise ComponentError(f"{name} declares the session input {n}, but the run's session "
+                                 f"has no {key}" + ("" if session else " (no session given)")
+                                 + f": add it ({SESSION_INPUTS[n]})")
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ComponentError(f"{key} = {v!r}: a number ({SESSION_INPUTS[n]})")
+        out[n] = float(v)
+    return out
+
+
+def load(name, vehicle, params=None, seed=0, base=None, session=None):
     """The component `name` for the car `vehicle` (a spec document), ready to step. `base`: the
     spec's directory, for a component that names files relative to it (`takes_base = True`: the
-    shipped `fmu`)."""
+    shipped `fmu`). `session`: the run's session record (scensim.session/1), for the session
+    inputs the component declares (scensim 091 W12)."""
     cls = resolve(name)
+    kw = {}
+    values = session_values(declared_session(cls, name), session, name)
+    if values is not None:
+        kw["session"] = values
     try:
         if getattr(cls, "takes_base", False):
-            component = cls(vehicle, dict(params or {}), int(seed), base=base)
+            component = cls(vehicle, dict(params or {}), int(seed), base=base, **kw)
         else:
-            component = cls(vehicle, dict(params or {}), int(seed))
+            component = cls(vehicle, dict(params or {}), int(seed), **kw)
     except ComponentError:
         raise
     except Exception as e:  # noqa: BLE001
@@ -196,17 +250,18 @@ def load(name, vehicle, params=None, seed=0, base=None):
     return check(component, name)
 
 
-def for_spec(vehicle, overrides=None, seed=0, component=None, base=None):
+def for_spec(vehicle, overrides=None, seed=0, component=None, base=None, session=None):
     """The component a spec's car runs: its `powertrain.model` (`ideal`, `ev`: the shipped
     onboard computers, `overrides` their calibration overrides), or for `component` the entry
     point `powertrain.component` with `powertrain.params`. `component`: a run's
     `{entry_point, params}` in place of the spec's. `base`: the spec's directory (relative files
-    in a component's params, as `fmu`'s unit)."""
+    in a component's params, as `fmu`'s unit). `session`: the run's session record (091 W12)."""
     pt = vehicle.get("powertrain") or {}
     if component:
-        return load(component["entry_point"], vehicle, component.get("params"), seed, base)
+        return load(component["entry_point"], vehicle, component.get("params"), seed, base,
+                    session)
     if pt.get("model") == "component":
-        return load(pt["component"], vehicle, pt.get("params"), seed, base)
+        return load(pt["component"], vehicle, pt.get("params"), seed, base, session)
     return load(pt.get("model") or "ideal", vehicle, overrides, seed, base)
 
 
@@ -305,5 +360,6 @@ def budget(physics_hz):
 
 
 __all__ = ["COMMAND_TYPES", "COMMANDS", "ComponentError", "EcuComponent", "Ev", "GROUP", "Ideal", "SHIPPED",
-           "TRUTH_INPUTS", "TRUTH_SETTINGS", "TruthFeed", "budget", "check", "checked",
-           "for_spec", "load", "resolve", "timing"]
+           "SESSION_INPUTS", "SESSION_SOURCES", "TRUTH_INPUTS", "TRUTH_SETTINGS", "TruthFeed",
+           "budget", "check", "checked", "declared_session", "for_spec", "load", "resolve",
+           "session_values", "timing"]
